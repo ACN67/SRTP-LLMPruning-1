@@ -6,8 +6,8 @@ Empirical study scaffold for comparing structured and unstructured LLM pruning m
 
 Models:
 
-- `Kwai-Klear/Klear-AgentForge-8B` (`klear_agentforge_8b`), using the Qwen3 architecture adapter.
-- `ibm-granite/granite-4.2-8b` (`granite_4_2_8b`), using the Granite architecture adapter.
+- `Kwai-Klear/Klear-AgentForge-8B` (`klear_agentforge_8b`), using the Qwen3 architecture adapter and pinned to `fa3d41e92e9ce7a5b4a52a3e7439aa00521f40c9`.
+- `ibm-granite/granite-4.2-8b` (`granite_4_2_8b`), using the Granite architecture adapter and pinned to `f8de16cdcdbc6c779ca517604e050d82cc119e44`.
 
 Pruning methods: Magnitude Pruning, Wanda, SparseGPT, and SLEB.
 
@@ -44,6 +44,28 @@ python -m unittest discover -s tests -v
 ```
 
 The dependencies provide the future model-loading environment, but the current smoke tests neither download nor load an 8B model.
+
+## Dense model validation
+
+Validate pinned metadata and adapter registration without downloading weights:
+
+```bash
+python scripts/validate_model.py --model klear_agentforge_8b --config-only
+python scripts/validate_model.py --model granite_4_2_8b --config-only
+```
+
+On a suitable GPU server, load the pinned model and tokenizer, validate the native structure, run a minimal forward, and optionally generate a few tokens:
+
+```bash
+python scripts/validate_model.py \
+  --model klear_agentforge_8b \
+  --load \
+  --device-map auto \
+  --cache-dir /data/cache \
+  --generate
+```
+
+Use `--local-path /data/models/<directory>` to override the Hugging Face source. Local overrides do not silently claim the configured upstream commit as their resolved revision. Real `--load` attempts always write a success or failure manifest under `experiments/generated/`; `--manifest` selects an explicit path. No adapter replaces the model's native decoder forward.
 
 ## Unified experiment entry point
 

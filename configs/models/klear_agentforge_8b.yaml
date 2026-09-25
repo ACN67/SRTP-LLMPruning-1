@@ -3,6 +3,15 @@ display_name: Klear-AgentForge-8B
 huggingface_repo_id: Kwai-Klear/Klear-AgentForge-8B
 architecture: Qwen3
 adapter: qwen3
-revision: main
+model_type: qwen3
+expected_model_class: Qwen3ForCausalLM
+revision: fa3d41e92e9ce7a5b4a52a3e7439aa00521f40c9
+default_dtype: bfloat16
+local_path: null
 trust_remote_code: false
+expected_num_hidden_layers: 36
+expected_hidden_size: 4096
+expected_intermediate_size: 12288
+expected_num_attention_heads: 32
+expected_num_key_value_heads: 8
 notes: Compatibility with pruning implementations must be verified before execution.

@@ -14,4 +14,4 @@ RUN python -m pip install --no-cache-dir -r requirements.txt
 COPY . .
 RUN mkdir -p /data/models /data/cache /data/datasets /data/checkpoints /data/results
 
-CMD ["python", "scripts/run_experiment.py", "--help"]
+CMD ["python", "scripts/validate_model.py", "--help"]

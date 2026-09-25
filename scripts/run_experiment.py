@@ -17,7 +17,12 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
-from src.models import get_model_adapter, list_model_ids, load_model_spec  # noqa: E402
+from src.models import (  # noqa: E402
+    build_model_manifest,
+    get_model_adapter,
+    list_model_ids,
+    load_model_spec,
+)
 from src.pruning import PRUNER_REGISTRY  # noqa: E402
 
 
@@ -62,22 +67,24 @@ def build_manifest(args: argparse.Namespace) -> dict[str, Any]:
 
     model = load_model_spec(args.model)
     adapter = get_model_adapter(model)
+    model_record = build_model_manifest(
+        model,
+        adapter,
+        repository_root=REPOSITORY_ROOT,
+        mode="planned_experiment",
+        status="planned",
+    )
+    created_at = model_record.pop("timestamp")
+    for key in ("schema_version", "mode", "status"):
+        model_record.pop(key)
     pruning = _load_yaml(CONFIG_ROOT / "pruning" / f"{args.pruner}.yaml")
     evaluation = _load_yaml(EVAL_CONFIG_DIR / f"{args.benchmark}.yaml")
 
     return {
-        "schema_version": 1,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "schema_version": 2,
+        "created_at": created_at,
         "status": "planned",
-        "model": {
-            "project_model_id": model.project_model_id,
-            "display_name": model.display_name,
-            "huggingface_repo_id": model.huggingface_repo_id,
-            "architecture": model.architecture,
-            "adapter": adapter.adapter_id,
-            "requested_revision": model.revision,
-            "resolved_revision": None,
-        },
+        "model": model_record,
         "pruning": {
             "method": pruning["method"],
             "sparsity": args.sparsity,

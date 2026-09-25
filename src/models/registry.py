@@ -48,5 +48,5 @@ def get_model_adapter(spec: ModelSpec) -> BaseModelAdapter:
     except KeyError as error:
         raise KeyError(f"No architecture adapter registered for {spec.adapter!r}") from error
     adapter = adapter_type()
-    adapter.validate(spec)
+    adapter.validate_spec(spec)
     return adapter
