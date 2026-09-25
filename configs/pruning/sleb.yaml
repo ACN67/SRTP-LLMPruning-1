@@ -1,0 +1,5 @@
+method: sleb
+display_name: SLEB
+default_sparsity: 0.3
+structure: block
+implementation_status: placeholder

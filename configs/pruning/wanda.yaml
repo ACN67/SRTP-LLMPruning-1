@@ -1,0 +1,5 @@
+method: wanda
+display_name: Wanda
+default_sparsity: 0.3
+structure: unstructured
+implementation_status: placeholder

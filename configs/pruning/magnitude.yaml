@@ -1,0 +1,5 @@
+method: magnitude
+display_name: Magnitude Pruning
+default_sparsity: 0.3
+structure: unstructured
+implementation_status: placeholder

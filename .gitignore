@@ -216,3 +216,50 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Hugging Face, datasets, and benchmark caches
+.cache/huggingface/
+huggingface/
+hf_cache/
+dataset_cache/
+datasets_cache/
+benchmark_cache/
+
+# Model weights and serialized tensor artifacts
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.ckpt
+*.gguf
+*.onnx
+*.h5
+*.hdf5
+
+# Local models and generated model artifacts
+models/*
+!models/README.md
+**/checkpoints/
+**/checkpoint-*/
+**/pruned_models/
+**/pruned-models/
+**/adapter_model/
+**/adapter_checkpoints/
+**/lora_checkpoints/
+
+# Runtime data and generated artifacts
+data/
+artifacts/
+wandb/
+mlruns/
+*.log
+logs/
+tmp/
+temp/
+
+# Secrets and local overrides
+*.pem
+*.key
+*.token
+.env.*
+!.env.example

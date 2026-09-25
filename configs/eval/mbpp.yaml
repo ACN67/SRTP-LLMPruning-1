@@ -1,0 +1,5 @@
+benchmark: mbpp
+display_name: MBPP
+implementation_status: placeholder
+dataset_path: null
+cache_dir: /data/cache/benchmarks/mbpp

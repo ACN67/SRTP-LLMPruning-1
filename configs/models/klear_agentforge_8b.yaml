@@ -1,0 +1,8 @@
+project_model_id: klear_agentforge_8b
+display_name: Klear-AgentForge-8B
+huggingface_repo_id: Kwai-Klear/Klear-AgentForge-8B
+architecture: Qwen3
+adapter: qwen3
+revision: main
+trust_remote_code: false
+notes: Compatibility with pruning implementations must be verified before execution.

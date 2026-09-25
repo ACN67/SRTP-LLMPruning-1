@@ -1,0 +1,5 @@
+method: sparsegpt
+display_name: SparseGPT
+default_sparsity: 0.3
+structure: unstructured
+implementation_status: placeholder

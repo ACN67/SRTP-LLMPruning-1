@@ -1,0 +1,8 @@
+project_model_id: granite_4_2_8b
+display_name: Granite-4.2-8B
+huggingface_repo_id: ibm-granite/granite-4.2-8b
+architecture: Granite
+adapter: granite
+revision: main
+trust_remote_code: false
+notes: Compatibility with pruning implementations must be verified before execution.

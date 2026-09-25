@@ -1,0 +1,5 @@
+benchmark: humaneval
+display_name: HumanEval
+implementation_status: placeholder
+dataset_path: null
+cache_dir: /data/cache/benchmarks/humaneval
