@@ -77,6 +77,7 @@ class BasePruner(ABC):
         model: Any,
         adapter: BaseModelAdapter,
         request: PruningRequest,
+        context: Any | None = None,
     ) -> PruningSummary:
         """Prune the model in place and return exact statistics."""
 

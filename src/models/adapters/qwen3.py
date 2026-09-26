@@ -12,3 +12,8 @@ class Qwen3Adapter(BaseModelAdapter):
 
     def get_backbone(self, model: Any) -> Any:
         return model.model
+
+    def normalize_block_output(self, output: Any) -> Any:
+        if isinstance(output, tuple):
+            raise TypeError("Qwen3 decoder block unexpectedly returned a tuple")
+        return output

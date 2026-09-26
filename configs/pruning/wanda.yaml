@@ -2,4 +2,24 @@ method: wanda
 display_name: Wanda
 default_sparsity: 0.3
 structure: unstructured
-implementation_status: placeholder
+scope: per_output_row
+score: absolute_weight_times_input_activation_l2
+rounding: floor_per_row
+calibration_required: true
+calibration_source: c4
+calibration_samples: 128
+calibration_sequence_length: 2048
+calibration_seed: 0
+sequential_layerwise: true
+weight_update: false
+retraining: false
+target_policy: linear_weights_inside_transformer_blocks
+excluded_components:
+  - token_embeddings
+  - final_norm
+  - all_norm_parameters
+  - lm_head
+  - bias
+  - parameters_outside_blocks
+implementation_version: "1.0"
+implementation_status: implemented

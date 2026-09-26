@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Plan an experiment or execute verified Magnitude Pruning."""
+"""Plan an experiment or execute verified Magnitude or Wanda pruning."""
 
 from __future__ import annotations
 
@@ -24,7 +24,14 @@ from src.models import (  # noqa: E402
     load_dense_model,
     load_model_spec,
 )
-from src.pruning import PRUNER_REGISTRY, PruningRequest, get_pruner  # noqa: E402
+from src.pruning import (  # noqa: E402
+    PRUNER_REGISTRY,
+    CalibrationConfig,
+    PruningRequest,
+    WandaPruningContext,
+    get_calibration_provider,
+    get_pruner,
+)
 
 CONFIG_ROOT = REPOSITORY_ROOT / "configs"
 EVAL_CONFIG_DIR = CONFIG_ROOT / "eval"
@@ -67,7 +74,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--execute",
         action="store_true",
-        help="load, prune, and save; currently implemented only for magnitude",
+        help="load, prune, and save; currently implemented for magnitude and wanda",
     )
     parser.add_argument("--local-path", type=Path)
     parser.add_argument("--cache-dir", type=Path)
@@ -79,6 +86,26 @@ def _parser() -> argparse.ArgumentParser:
         help="Transformers device_map string such as 'auto', or a JSON object",
     )
     parser.add_argument("--local-files-only", action="store_true")
+    parser.add_argument(
+        "--calibration-source",
+        choices=("c4",),
+        help="Wanda calibration source (default from pruning config: c4)",
+    )
+    parser.add_argument(
+        "--calibration-samples",
+        type=int,
+        help="Wanda calibration sample count (default: 128)",
+    )
+    parser.add_argument(
+        "--calibration-seqlen",
+        type=int,
+        help="Wanda calibration token length (default: 2048)",
+    )
+    parser.add_argument(
+        "--calibration-seed",
+        type=int,
+        help="Wanda calibration sampling seed (default: 0)",
+    )
     parser.add_argument(
         "--output-dir",
         type=Path,
@@ -106,6 +133,30 @@ def _load_options(args: argparse.Namespace) -> LoadOptions:
     )
 
 
+def _resolve_calibration_config(
+    args: argparse.Namespace,
+    pruning: dict[str, Any],
+) -> CalibrationConfig:
+    return CalibrationConfig(
+        source=args.calibration_source or pruning["calibration_source"],
+        samples=(
+            args.calibration_samples
+            if args.calibration_samples is not None
+            else int(pruning["calibration_samples"])
+        ),
+        sequence_length=(
+            args.calibration_seqlen
+            if args.calibration_seqlen is not None
+            else int(pruning["calibration_sequence_length"])
+        ),
+        seed=(
+            args.calibration_seed
+            if args.calibration_seed is not None
+            else int(pruning["calibration_seed"])
+        ),
+    )
+
+
 def build_manifest(args: argparse.Namespace) -> dict[str, Any]:
     request = PruningRequest(args.model, args.pruner, args.sparsity)
     spec = load_model_spec(args.model)
@@ -123,6 +174,9 @@ def build_manifest(args: argparse.Namespace) -> dict[str, Any]:
     for key in ("schema_version", "mode", "status"):
         model_record.pop(key)
     pruning = _load_yaml(CONFIG_ROOT / "pruning" / f"{args.pruner}.yaml")
+    calibration = None
+    if args.pruner == "wanda":
+        calibration = _resolve_calibration_config(args, pruning).to_dict()
     evaluation = None
     if args.benchmark:
         evaluation_config = _load_yaml(EVAL_CONFIG_DIR / f"{args.benchmark}.yaml")
@@ -144,6 +198,10 @@ def build_manifest(args: argparse.Namespace) -> dict[str, Any]:
             "scope": pruning.get("scope"),
             "target_policy": pruning.get("target_policy"),
             "excluded_components": pruning.get("excluded_components"),
+            "score": pruning.get("score"),
+            "rounding": pruning.get("rounding"),
+            "sequential_layerwise": pruning.get("sequential_layerwise"),
+            "calibration": calibration,
         },
         "evaluation": evaluation,
     }
@@ -193,7 +251,7 @@ def execute_experiment(args: argparse.Namespace) -> dict[str, Any]:
     """Execute a supported pruner and persist a standard HF checkpoint."""
 
     request = PruningRequest(args.model, args.pruner, args.sparsity)
-    if args.pruner != "magnitude":
+    if args.pruner not in {"magnitude", "wanda"}:
         raise NotImplementedError(
             f"--execute is not implemented for pruner {args.pruner!r}"
         )
@@ -213,7 +271,16 @@ def execute_experiment(args: argparse.Namespace) -> dict[str, Any]:
     adapter = get_model_adapter(spec)
     options = _load_options(args)
     loaded = load_dense_model(spec, adapter, options)
-    summary = get_pruner(args.pruner).prune(loaded.model, adapter, request)
+    pruner = get_pruner(args.pruner)
+    if args.pruner == "wanda":
+        pruning_config = _load_yaml(CONFIG_ROOT / "pruning" / "wanda.yaml")
+        calibration_config = _resolve_calibration_config(args, pruning_config)
+        provider = get_calibration_provider(calibration_config.source)
+        calibration_samples = provider.prepare(loaded.tokenizer, calibration_config)
+        context = WandaPruningContext(calibration_config, calibration_samples)
+        summary = pruner.prune(loaded.model, adapter, request, context)
+    else:
+        summary = pruner.prune(loaded.model, adapter, request)
 
     output_dir.mkdir(parents=True, exist_ok=True)
     loaded.model.save_pretrained(output_dir)
@@ -223,7 +290,7 @@ def execute_experiment(args: argparse.Namespace) -> dict[str, Any]:
         spec,
         adapter,
         repository_root=REPOSITORY_ROOT,
-        mode="magnitude_pruning",
+        mode=f"{args.pruner}_pruning",
         status="completed",
         options=options,
         loaded=loaded,

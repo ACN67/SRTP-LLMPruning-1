@@ -11,6 +11,10 @@ class SLEBPruner(BasePruner):
     method_id = "sleb"
 
     def prune(
-        self, model: Any, adapter: BaseModelAdapter, request: PruningRequest
+        self,
+        model: Any,
+        adapter: BaseModelAdapter,
+        request: PruningRequest,
+        context: Any | None = None,
     ) -> Any:
         raise NotImplementedError("SLEB has not yet been verified and adapted.")

@@ -83,3 +83,30 @@ Difficulty: **Medium**.
 
 Directly port the compact `WrappedGPT` statistics and Wanda masking logic under MIT attribution. Replace upstream model loading, dataset code, fixed activation allocation, device-map string logic, and decoder replay with project-owned components. Before claiming support, run calibration-capture, target-module enumeration, sparsity, logits, save/reload, and peak-memory tests on small models or tiny randomly initialized configs of the same architecture.
 
+## Implemented project adaptation
+
+The project implementation is independent code based on the algorithm and execution semantics audited at upstream commit `8e8fc87b4a2f9955baa7e76e64d5fce7fa8724a6`. The official repository is MIT licensed; no upstream package or complete source file is vendored.
+
+Official invariants retained:
+
+- score is `abs(weight) * sqrt(sum(input_activation ** 2))` per input channel;
+- comparison and stable exact-k selection are independent per output row;
+- calibration data is required;
+- blocks are processed sequentially and the next block receives the preceding pruned block's output;
+- masking only sets selected original weights to zero;
+- no reconstruction, weight update, gradients, or retraining;
+- only basic unstructured Wanda is implemented, not the alpha-search variant or N:M modes.
+
+Project engineering adaptations:
+
+- Qwen3 and Granite traversal remains adapter-owned.
+- Native backbone forward hooks capture the actual block positional arguments and kwargs rather than reconstructing RoPE, causal masks, cache positions, or residual behavior.
+- Adapters normalize Qwen3's Tensor block output and Granite's tuple block output.
+- Calibration length is explicitly 2048 rather than inherited from maximum context.
+- The C4 loader uses the modern `allenai/c4`, `en` datasets API with the official English training shard and preserves random-document/random-contiguous-token-span sampling.
+- Nested captured tensors are moved to each native block's device for replay.
+- Project summaries and manifests distinguish requested masks, pre-existing zeros, newly zeroed weights, and total post-pruning zeros.
+
+These are architecture and dependency compatibility adaptations, not changes to Wanda's importance metric, per-output grouping, or sequential layer-wise algorithm.
+
+The official `WrappedGPT.scaler_row` divides its running squared statistic by the number of calibration samples. This project accumulates the unnormalized squared L2 sum and takes its square root. The omitted `1 / sqrt(num_samples)` factor is identical for every input channel of a Linear, so stable per-row rankings and masks are exactly equivalent for the fixed-shape, batch-one calibration protocol.

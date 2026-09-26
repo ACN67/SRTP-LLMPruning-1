@@ -171,6 +171,22 @@ class BaseModelAdapter(ABC):
     def get_lm_head(self, model: Any) -> Any:
         return model.lm_head
 
+    @abstractmethod
+    def normalize_block_output(self, output: Any) -> Any:
+        """Return hidden states from this architecture's native block output."""
+
+    def replay_block(
+        self,
+        block: Any,
+        hidden_states: Any,
+        positional_args: tuple[Any, ...],
+        keyword_args: Mapping[str, Any],
+    ) -> Any:
+        """Invoke a native block with context captured from model forward."""
+
+        output = block(hidden_states, *positional_args, **keyword_args)
+        return self.normalize_block_output(output)
+
     def get_structure(self, model: Any) -> dict[str, Any]:
         config = model.config
         return {

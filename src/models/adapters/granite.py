@@ -12,3 +12,8 @@ class GraniteAdapter(BaseModelAdapter):
 
     def get_backbone(self, model: Any) -> Any:
         return model.model
+
+    def normalize_block_output(self, output: Any) -> Any:
+        if not isinstance(output, tuple) or not output:
+            raise TypeError("Granite decoder block must return a non-empty tuple")
+        return output[0]

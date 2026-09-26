@@ -29,7 +29,10 @@ class MagnitudePruner(BasePruner):
         model: Any,
         adapter: BaseModelAdapter,
         request: PruningRequest,
+        context: Any | None = None,
     ) -> PruningSummary:
+        if context is not None:
+            raise ValueError("Magnitude pruning does not accept calibration context")
         if request.method != self.method_id:
             raise ValueError(
                 f"Request method {request.method!r} does not match {self.method_id!r}"

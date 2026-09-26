@@ -1,10 +1,17 @@
 """Pruning interfaces and registered methods."""
 
 from .base import BasePruner, ModulePruningStats, PruningRequest, PruningSummary
+from .calibration import (
+    C4CalibrationProvider,
+    CalibrationConfig,
+    CalibrationSample,
+    WandaPruningContext,
+    get_calibration_provider,
+)
 from .magnitude import MagnitudePruner
 from .sleb import SLEBPruner
 from .sparsegpt import SparseGPTPruner
-from .wanda import WandaPruner
+from .wanda import WandaActivationStats, WandaPruner, WandaPruningSummary, wanda_mask
 
 PRUNER_REGISTRY: dict[str, type[BasePruner]] = {
     "magnitude": MagnitudePruner,
@@ -24,9 +31,17 @@ def get_pruner(method_id: str) -> BasePruner:
 
 __all__ = [
     "BasePruner",
+    "C4CalibrationProvider",
+    "CalibrationConfig",
+    "CalibrationSample",
     "ModulePruningStats",
     "PRUNER_REGISTRY",
     "PruningRequest",
     "PruningSummary",
+    "WandaActivationStats",
+    "WandaPruningContext",
+    "WandaPruningSummary",
     "get_pruner",
+    "get_calibration_provider",
+    "wanda_mask",
 ]

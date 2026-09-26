@@ -11,6 +11,10 @@ class SparseGPTPruner(BasePruner):
     method_id = "sparsegpt"
 
     def prune(
-        self, model: Any, adapter: BaseModelAdapter, request: PruningRequest
+        self,
+        model: Any,
+        adapter: BaseModelAdapter,
+        request: PruningRequest,
+        context: Any | None = None,
     ) -> Any:
         raise NotImplementedError("SparseGPT has not yet been verified and adapted.")

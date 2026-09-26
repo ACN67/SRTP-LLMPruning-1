@@ -187,7 +187,7 @@ class MagnitudeAlgorithmTests(unittest.TestCase):
 
 class CliValidationTests(unittest.TestCase):
     def test_unimplemented_execute_fails_clearly(self) -> None:
-        for pruner in ("wanda", "sparsegpt", "sleb"):
+        for pruner in ("sparsegpt", "sleb"):
             with self.subTest(pruner=pruner):
                 result = subprocess.run(
                     [
