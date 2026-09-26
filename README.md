@@ -1,6 +1,6 @@
 # SRTP LLM Pruning
 
-Empirical study scaffold for comparing structured and unstructured LLM pruning methods on code-generation benchmarks. Dense model loading, Magnitude Pruning, and basic unstructured Wanda are implemented. SparseGPT, SLEB, and benchmark execution remain placeholders.
+Empirical study scaffold for comparing structured and unstructured LLM pruning methods on code-generation benchmarks. Dense model loading, Magnitude Pruning, basic unstructured Wanda, and basic unstructured SparseGPT are implemented. SLEB and benchmark execution remain placeholders.
 
 ## Initial study matrix
 
@@ -60,6 +60,12 @@ The implemented Wanda baseline uses `abs(weight) * input-channel activation L2` 
 The canonical protocol is C4 training data, 128 random tokenized samples, sequence length 2048, and seed 0. Sampling selects a random sufficiently long document and then a random contiguous token span. The explicit 2048-token length is not inferred from a model's maximum context. Tests inject local samples and never download C4.
 
 Native model hooks capture the current Transformers block kwargs, including masks, positions, cache position, and rotary embeddings. Architecture adapters normalize Qwen3's Tensor block output and Granite's tuple output. Tiny real-architecture replay equivalence, sequential propagation, pruning, forward, and save/reload are tested; real 8B and C4/GPU validation remain pending.
+
+## SparseGPT
+
+The implemented baseline is basic unstructured SparseGPT with the official full FP32 input Hessian/Gram accumulator, 1% mean-diagonal damping, Cholesky inverse-factor sequence, and adaptive mask selection in 128-column input blocks. It performs the official column-wise OBS/GPTQ-style error compensation, so unmasked target weights can change during reconstruction. It does not implement N:M sparsity, quantization, `--true-sequential`, variants, or retraining.
+
+SparseGPT reuses Wanda's canonical C4 calibration protocol: 128 random 2048-token segments from the first training shard with seed 0. Transformer blocks are processed sequentially; all Linear modules in the current block collect Hessians together, are pruned independently, and the reconstructed block output calibrates the next block. Tiny Qwen3 and Granite forward/save/reload behavior is tested. Real 8B, real C4, GPU memory, large Cholesky workspaces, CUDA numerical behavior, and runtime remain pending.
 
 ## Dense model validation
 
@@ -127,7 +133,25 @@ python scripts/run_experiment.py \
   --output-dir /data/checkpoints/granite_4_2_8b/wanda/s020
 ```
 
-SparseGPT and SLEB deliberately fail if passed with `--execute`.
+SparseGPT uses the same calibration flags and adds optional `--sparsegpt-percdamp` and `--sparsegpt-blocksize` overrides; their official baseline defaults are `0.01` and `128`:
+
+```bash
+python scripts/run_experiment.py \
+  --model klear_agentforge_8b \
+  --pruner sparsegpt \
+  --sparsity 0.30 \
+  --execute \
+  --device-map auto \
+  --calibration-source c4 \
+  --calibration-samples 128 \
+  --calibration-seqlen 2048 \
+  --calibration-seed 0 \
+  --sparsegpt-percdamp 0.01 \
+  --sparsegpt-blocksize 128 \
+  --output-dir /data/checkpoints/klear_agentforge_8b/sparsegpt/s030
+```
+
+SLEB deliberately fails if passed with `--execute`.
 
 ## Docker and persistent data
 

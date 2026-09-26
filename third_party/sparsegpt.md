@@ -85,3 +85,30 @@ Difficulty: **High**.
 
 Port the `SparseGPT` per-linear core with Apache-2.0 notices and a record of modifications. Do not import the old architecture scripts wholesale. Reuse the project’s future calibration-capture interface from Wanda, but add a resource planner, per-module processing schedule, numerical-failure reporting for Cholesky, and clean save/reload validation. Keep optional quantization outside the first pruning milestone because it changes artifact compatibility and is not in the current study scope.
 
+## Implemented project adaptation
+
+The project implementation in `src/pruning/sparsegpt.py` is adapted from the Apache-2.0 licensed core at upstream commit `147d2159dc4f3e9f73e47b32c04d7b3708f44436`.
+
+Official algorithm invariants retained:
+
+- complete FP32 input Hessian/Gram matrix and the fixed `add_batch()` normalization;
+- dead input-channel zeroing;
+- default 1% mean-diagonal damping;
+- Cholesky, inverse, and upper-Cholesky sequence;
+- adaptive unstructured threshold masks inside default 128-column blocks;
+- column-wise OBS/GPTQ-style reconstruction and cross-block lazy error updates;
+- non-pruned weight updates, no retraining, and canonical 128 × 2048 C4 calibration.
+
+Project engineering adaptations:
+
+- ordinary `torch.nn.Linear` weights only; no Conv2d, Transformers Conv1D, N:M, quantizer, or debug path;
+- shared Qwen3/Granite adapters and native block context replay instead of copying legacy LLaMA forwards;
+- reuse of the modern C4 provider, manifest/statistics schema, and output-directory safety checks;
+- explicit Cholesky failure context without pseudoinverse or automatic damping changes;
+- explicit `sparsity == 0` no-op guard for the upstream threshold-index corner case;
+- manifest statistics separate the nominal per-adaptive-block target count from
+  the actual threshold-selected mask count: the upstream 0-based index and
+  `<=` comparison select `floor(N * sparsity) + 1` positions without ties and
+  can select more when scores tie;
+- no import-time mutation of global CUDA TF32 settings; CUDA/TF32 fidelity remains pending server validation;
+- CPU tiny-model fidelity, forward, and save/reload tests only. Real 8B resource behavior remains pending.

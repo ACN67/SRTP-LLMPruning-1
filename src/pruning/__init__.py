@@ -3,6 +3,7 @@
 from .base import BasePruner, ModulePruningStats, PruningRequest, PruningSummary
 from .calibration import (
     C4CalibrationProvider,
+    CalibrationContext,
     CalibrationConfig,
     CalibrationSample,
     WandaPruningContext,
@@ -10,7 +11,13 @@ from .calibration import (
 )
 from .magnitude import MagnitudePruner
 from .sleb import SLEBPruner
-from .sparsegpt import SparseGPTPruner
+from .sparsegpt import (
+    SparseGPTCoreResult,
+    SparseGPTHessian,
+    SparseGPTPruner,
+    SparseGPTPruningSummary,
+    sparsegpt_reconstruct,
+)
 from .wanda import WandaActivationStats, WandaPruner, WandaPruningSummary, wanda_mask
 
 PRUNER_REGISTRY: dict[str, type[BasePruner]] = {
@@ -32,16 +39,22 @@ def get_pruner(method_id: str) -> BasePruner:
 __all__ = [
     "BasePruner",
     "C4CalibrationProvider",
+    "CalibrationContext",
     "CalibrationConfig",
     "CalibrationSample",
     "ModulePruningStats",
     "PRUNER_REGISTRY",
     "PruningRequest",
     "PruningSummary",
+    "SparseGPTCoreResult",
+    "SparseGPTHessian",
+    "SparseGPTPruner",
+    "SparseGPTPruningSummary",
     "WandaActivationStats",
     "WandaPruningContext",
     "WandaPruningSummary",
     "get_pruner",
     "get_calibration_provider",
+    "sparsegpt_reconstruct",
     "wanda_mask",
 ]

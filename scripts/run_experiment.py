@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Plan an experiment or execute verified Magnitude or Wanda pruning."""
+"""Plan or execute verified Magnitude, Wanda, or SparseGPT pruning."""
 
 from __future__ import annotations
 
@@ -26,9 +26,10 @@ from src.models import (  # noqa: E402
 )
 from src.pruning import (  # noqa: E402
     PRUNER_REGISTRY,
+    CalibrationContext,
     CalibrationConfig,
     PruningRequest,
-    WandaPruningContext,
+    SparseGPTPruner,
     get_calibration_provider,
     get_pruner,
 )
@@ -74,7 +75,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--execute",
         action="store_true",
-        help="load, prune, and save; currently implemented for magnitude and wanda",
+        help="load, prune, and save; implemented for magnitude, wanda, and sparsegpt",
     )
     parser.add_argument("--local-path", type=Path)
     parser.add_argument("--cache-dir", type=Path)
@@ -89,22 +90,32 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--calibration-source",
         choices=("c4",),
-        help="Wanda calibration source (default from pruning config: c4)",
+        help="Wanda/SparseGPT calibration source (default: c4)",
     )
     parser.add_argument(
         "--calibration-samples",
         type=int,
-        help="Wanda calibration sample count (default: 128)",
+        help="Wanda/SparseGPT calibration sample count (default: 128)",
     )
     parser.add_argument(
         "--calibration-seqlen",
         type=int,
-        help="Wanda calibration token length (default: 2048)",
+        help="Wanda/SparseGPT calibration token length (default: 2048)",
     )
     parser.add_argument(
         "--calibration-seed",
         type=int,
-        help="Wanda calibration sampling seed (default: 0)",
+        help="Wanda/SparseGPT calibration sampling seed (default: 0)",
+    )
+    parser.add_argument(
+        "--sparsegpt-percdamp",
+        type=float,
+        help="SparseGPT diagonal damping fraction (default: 0.01)",
+    )
+    parser.add_argument(
+        "--sparsegpt-blocksize",
+        type=int,
+        help="SparseGPT adaptive input-column block size (default: 128)",
     )
     parser.add_argument(
         "--output-dir",
@@ -157,6 +168,21 @@ def _resolve_calibration_config(
     )
 
 
+def _resolve_sparsegpt_options(
+    args: argparse.Namespace,
+    pruning: dict[str, Any],
+) -> tuple[float, int]:
+    percdamp_arg = getattr(args, "sparsegpt_percdamp", None)
+    blocksize_arg = getattr(args, "sparsegpt_blocksize", None)
+    percdamp = float(pruning["percdamp"] if percdamp_arg is None else percdamp_arg)
+    blocksize = int(pruning["blocksize"] if blocksize_arg is None else blocksize_arg)
+    if percdamp < 0:
+        raise ValueError("SparseGPT percdamp must be non-negative")
+    if blocksize <= 0:
+        raise ValueError("SparseGPT blocksize must be positive")
+    return percdamp, blocksize
+
+
 def build_manifest(args: argparse.Namespace) -> dict[str, Any]:
     request = PruningRequest(args.model, args.pruner, args.sparsity)
     spec = load_model_spec(args.model)
@@ -175,8 +201,14 @@ def build_manifest(args: argparse.Namespace) -> dict[str, Any]:
         model_record.pop(key)
     pruning = _load_yaml(CONFIG_ROOT / "pruning" / f"{args.pruner}.yaml")
     calibration = None
-    if args.pruner == "wanda":
+    if args.pruner in {"wanda", "sparsegpt"}:
         calibration = _resolve_calibration_config(args, pruning).to_dict()
+    sparsegpt_percdamp = pruning.get("percdamp")
+    sparsegpt_blocksize = pruning.get("blocksize")
+    if args.pruner == "sparsegpt":
+        sparsegpt_percdamp, sparsegpt_blocksize = _resolve_sparsegpt_options(
+            args, pruning
+        )
     evaluation = None
     if args.benchmark:
         evaluation_config = _load_yaml(EVAL_CONFIG_DIR / f"{args.benchmark}.yaml")
@@ -201,6 +233,16 @@ def build_manifest(args: argparse.Namespace) -> dict[str, Any]:
             "score": pruning.get("score"),
             "rounding": pruning.get("rounding"),
             "sequential_layerwise": pruning.get("sequential_layerwise"),
+            "criterion": pruning.get("criterion"),
+            "percdamp": sparsegpt_percdamp,
+            "blocksize": sparsegpt_blocksize,
+            "adaptive_mask_selection": pruning.get("adaptive_mask_selection"),
+            "error_compensation": pruning.get("error_compensation"),
+            "weight_update": pruning.get("weight_update"),
+            "retraining": pruning.get("retraining"),
+            "quantization": pruning.get("quantization"),
+            "nm_sparsity": pruning.get("nm_sparsity"),
+            "true_sequential": pruning.get("true_sequential"),
             "calibration": calibration,
         },
         "evaluation": evaluation,
@@ -251,7 +293,7 @@ def execute_experiment(args: argparse.Namespace) -> dict[str, Any]:
     """Execute a supported pruner and persist a standard HF checkpoint."""
 
     request = PruningRequest(args.model, args.pruner, args.sparsity)
-    if args.pruner not in {"magnitude", "wanda"}:
+    if args.pruner not in {"magnitude", "wanda", "sparsegpt"}:
         raise NotImplementedError(
             f"--execute is not implemented for pruner {args.pruner!r}"
         )
@@ -267,17 +309,21 @@ def execute_experiment(args: argparse.Namespace) -> dict[str, Any]:
         local_path=args.local_path,
         overwrite=args.overwrite_output_dir,
     )
+    pruning_config = _load_yaml(CONFIG_ROOT / "pruning" / f"{args.pruner}.yaml")
+    if args.pruner == "sparsegpt":
+        percdamp, blocksize = _resolve_sparsegpt_options(args, pruning_config)
+        pruner = SparseGPTPruner(percdamp=percdamp, blocksize=blocksize)
+    else:
+        pruner = get_pruner(args.pruner)
     spec = load_model_spec(args.model)
     adapter = get_model_adapter(spec)
     options = _load_options(args)
     loaded = load_dense_model(spec, adapter, options)
-    pruner = get_pruner(args.pruner)
-    if args.pruner == "wanda":
-        pruning_config = _load_yaml(CONFIG_ROOT / "pruning" / "wanda.yaml")
+    if args.pruner in {"wanda", "sparsegpt"}:
         calibration_config = _resolve_calibration_config(args, pruning_config)
         provider = get_calibration_provider(calibration_config.source)
         calibration_samples = provider.prepare(loaded.tokenizer, calibration_config)
-        context = WandaPruningContext(calibration_config, calibration_samples)
+        context = CalibrationContext(calibration_config, calibration_samples)
         summary = pruner.prune(loaded.model, adapter, request, context)
     else:
         summary = pruner.prune(loaded.model, adapter, request)

@@ -50,9 +50,9 @@ class PrunerRegistryTests(unittest.TestCase):
         )
 
     def test_unimplemented_pruners_are_explicit_placeholders(self) -> None:
-        request = PruningRequest("klear_agentforge_8b", "sparsegpt", 0.3)
+        request = PruningRequest("klear_agentforge_8b", "sleb", 0.3)
         with self.assertRaises(NotImplementedError):
-            get_pruner("sparsegpt").prune(object(), object(), request)
+            get_pruner("sleb").prune(object(), object(), request)
 
     def test_invalid_sparsity_is_rejected(self) -> None:
         with self.assertRaises(ValueError):
@@ -67,7 +67,7 @@ class PrunerRegistryTests(unittest.TestCase):
                 self.assertEqual(config["method"], method_id)
                 expected = (
                     "implemented"
-                    if method_id in {"magnitude", "wanda"}
+                    if method_id in {"magnitude", "wanda", "sparsegpt"}
                     else "placeholder"
                 )
                 self.assertEqual(config["implementation_status"], expected)

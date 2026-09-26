@@ -33,7 +33,7 @@ class CalibrationSample:
 
 
 @dataclass(frozen=True)
-class WandaPruningContext:
+class CalibrationContext:
     config: CalibrationConfig
     samples: tuple[CalibrationSample, ...]
 
@@ -57,6 +57,10 @@ class WandaPruningContext:
                     f"Calibration sample {index} attention mask shape does not "
                     "match input_ids"
                 )
+
+
+# Backwards-compatible import for the Wanda implementation and existing callers.
+WandaPruningContext = CalibrationContext
 
 
 def _default_c4_loader() -> Sequence[Any]:
