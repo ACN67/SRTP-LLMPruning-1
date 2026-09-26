@@ -1,6 +1,6 @@
 # SRTP LLM Pruning
 
-Empirical study scaffold for comparing structured and unstructured LLM pruning methods on code-generation benchmarks. Dense model loading, Magnitude Pruning, basic unstructured Wanda, and basic unstructured SparseGPT are implemented. SLEB and benchmark execution remain placeholders.
+Empirical study scaffold for comparing structured and unstructured LLM pruning methods on code-generation benchmarks. Dense model loading, Magnitude Pruning, basic unstructured Wanda, basic unstructured SparseGPT, and SLEB are implemented. Benchmark execution remains a placeholder.
 
 ## Initial study matrix
 
@@ -66,6 +66,12 @@ Native model hooks capture the current Transformers block kwargs, including mask
 The implemented baseline is basic unstructured SparseGPT with the official full FP32 input Hessian/Gram accumulator, 1% mean-diagonal damping, Cholesky inverse-factor sequence, and adaptive mask selection in 128-column input blocks. It performs the official column-wise OBS/GPTQ-style error compensation, so unmasked target weights can change during reconstruction. It does not implement N:M sparsity, quantization, `--true-sequential`, variants, or retraining.
 
 SparseGPT reuses Wanda's canonical C4 calibration protocol: 128 random 2048-token segments from the first training shard with seed 0. Transformer blocks are processed sequentially; all Linear modules in the current block collect Hessians together, are pruned independently, and the reconstructed block output calibrates the next block. Tiny Qwen3 and Granite forward/save/reload behavior is tested. Real 8B, real C4, GPU memory, large Cholesky workspaces, CUDA numerical behavior, and runtime remain pending.
+
+## SLEB
+
+The SLEB baseline follows the pinned official repository implementation as the canonical executable behavior. It greedily and physically removes complete transformer decoder blocks, dynamically re-scores every eligible current block with the official chunked language-model loss, uses default early/latter barriers of 1/1, and resolves exact ties in favor of the first ascending candidate.
+
+Calibration shuffles WikiText-2 training rows with seed 0, concatenates the first 128 rows with `"\n\n"`, and tokenizes once with a dedicated official-style slow tokenizer (`use_fast=False`) loaded from the same model source, revision, trust, locality, and cache settings as the dense model. The checkpoint still saves the dense loader's tokenizer. Scoring uses full 2048-token chunks and drops the tail. Qwen3 and Granite use exception-safe native `ModuleList` removal instead of copied legacy decoder forwards. Tiny multi-round models validate physical depth reduction, retained-weight integrity, search-time metadata preservation, final metadata updates, save/reload, cached forward, and generation. Real 8B, WikiText-2 network access, GPU execution, repeated-search runtime, Accelerate/device-map behavior, and a manifest-aware reduced-checkpoint benchmark loader remain pending.
 
 ## Dense model validation
 
@@ -151,7 +157,23 @@ python scripts/run_experiment.py \
   --output-dir /data/checkpoints/klear_agentforge_8b/sparsegpt/s030
 ```
 
-SLEB deliberately fails if passed with `--execute`.
+SLEB uses WikiText-2 source-row calibration semantics; `--calibration-samples` means shuffled source rows rather than independent token segments:
+
+```bash
+python scripts/run_experiment.py \
+  --model klear_agentforge_8b \
+  --pruner sleb \
+  --sparsity 0.20 \
+  --execute \
+  --device-map auto \
+  --calibration-source wikitext2 \
+  --calibration-samples 128 \
+  --calibration-seqlen 2048 \
+  --calibration-seed 0 \
+  --sleb-early-barrier 1 \
+  --sleb-latter-barrier 1 \
+  --output-dir /data/checkpoints/klear_agentforge_8b/sleb/s020
+```
 
 ## Docker and persistent data
 

@@ -138,6 +138,39 @@ class BaseModelAdapter(ABC):
     def get_num_blocks(self, model: Any) -> int:
         return len(self.get_blocks(model))
 
+    def replace_blocks(self, model: Any, blocks: Sequence[Any]) -> Any:
+        """Replace the native block container without copying block forwards."""
+
+        try:
+            from torch import nn
+        except ImportError as error:
+            raise RuntimeError("PyTorch is required for block replacement") from error
+        container = blocks if isinstance(blocks, nn.ModuleList) else nn.ModuleList(blocks)
+        self.get_backbone(model).layers = container
+        return container
+
+    def capture_block_removal_metadata(self, model: Any) -> Any:
+        """Capture architecture metadata needed after physical block removal."""
+
+        return None
+
+    def finalize_block_removal(
+        self,
+        model: Any,
+        retained_original_indices: Sequence[int],
+        metadata: Any = None,
+    ) -> None:
+        """Finalize native config depth and cache-facing attention indices."""
+
+        blocks = self.get_blocks(model)
+        if len(blocks) != len(retained_original_indices):
+            raise ValueError("Retained index count does not match final block count")
+        model.config.num_hidden_layers = len(blocks)
+        for new_index, block in enumerate(blocks):
+            attention = getattr(block, "self_attn", None)
+            if attention is not None and hasattr(attention, "layer_idx"):
+                attention.layer_idx = new_index
+
     def get_linear_modules(
         self,
         block: Any,

@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""Plan or execute verified Magnitude, Wanda, or SparseGPT pruning."""
+"""Plan or execute verified Magnitude, Wanda, SparseGPT, or SLEB pruning."""
 
 from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -29,9 +31,13 @@ from src.pruning import (  # noqa: E402
     CalibrationContext,
     CalibrationConfig,
     PruningRequest,
+    SLEBCalibrationConfig,
+    SLEBCalibrationContext,
+    SLEBPruner,
     SparseGPTPruner,
     get_calibration_provider,
     get_pruner,
+    get_sleb_calibration_provider,
 )
 
 CONFIG_ROOT = REPOSITORY_ROOT / "configs"
@@ -75,7 +81,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--execute",
         action="store_true",
-        help="load, prune, and save; implemented for magnitude, wanda, and sparsegpt",
+        help="load, prune, and save; implemented for all registered pruning methods",
     )
     parser.add_argument("--local-path", type=Path)
     parser.add_argument("--cache-dir", type=Path)
@@ -89,23 +95,26 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--local-files-only", action="store_true")
     parser.add_argument(
         "--calibration-source",
-        choices=("c4",),
-        help="Wanda/SparseGPT calibration source (default: c4)",
+        choices=("c4", "wikitext2"),
+        help="calibration source: C4 for Wanda/SparseGPT, WikiText-2 for SLEB",
     )
     parser.add_argument(
         "--calibration-samples",
         type=int,
-        help="Wanda/SparseGPT calibration sample count (default: 128)",
+        help=(
+            "Wanda/SparseGPT independent sample count, or SLEB shuffled "
+            "WikiText-2 source-row count (default: 128)"
+        ),
     )
     parser.add_argument(
         "--calibration-seqlen",
         type=int,
-        help="Wanda/SparseGPT calibration token length (default: 2048)",
+        help="fixed sample length for Wanda/SparseGPT, or SLEB loss chunk length",
     )
     parser.add_argument(
         "--calibration-seed",
         type=int,
-        help="Wanda/SparseGPT calibration sampling seed (default: 0)",
+        help="calibration sampling/shuffle seed (default: 0)",
     )
     parser.add_argument(
         "--sparsegpt-percdamp",
@@ -116,6 +125,16 @@ def _parser() -> argparse.ArgumentParser:
         "--sparsegpt-blocksize",
         type=int,
         help="SparseGPT adaptive input-column block size (default: 128)",
+    )
+    parser.add_argument(
+        "--sleb-early-barrier",
+        type=int,
+        help="SLEB protected current blocks at the start (official default: 1)",
+    )
+    parser.add_argument(
+        "--sleb-latter-barrier",
+        type=int,
+        help="SLEB protected current blocks at the end (official default: 1)",
     )
     parser.add_argument(
         "--output-dir",
@@ -183,6 +202,63 @@ def _resolve_sparsegpt_options(
     return percdamp, blocksize
 
 
+def _resolve_sleb_config(
+    args: argparse.Namespace,
+    pruning: dict[str, Any],
+) -> tuple[SLEBCalibrationConfig, int, int]:
+    calibration = SLEBCalibrationConfig(
+        source=getattr(args, "calibration_source", None)
+        or pruning["calibration_source"],
+        source_rows=(
+            args.calibration_samples
+            if getattr(args, "calibration_samples", None) is not None
+            else int(pruning["calibration_source_rows"])
+        ),
+        sequence_length=(
+            args.calibration_seqlen
+            if getattr(args, "calibration_seqlen", None) is not None
+            else int(pruning["calibration_sequence_length"])
+        ),
+        seed=(
+            args.calibration_seed
+            if getattr(args, "calibration_seed", None) is not None
+            else int(pruning["calibration_seed"])
+        ),
+        sampling_semantics=pruning["calibration_sampling_semantics"],
+        separator=pruning["calibration_separator"],
+    )
+    early_arg = getattr(args, "sleb_early_barrier", None)
+    latter_arg = getattr(args, "sleb_latter_barrier", None)
+    early = int(pruning["early_barrier"] if early_arg is None else early_arg)
+    latter = int(pruning["latter_barrier"] if latter_arg is None else latter_arg)
+    if early < 0 or latter < 0:
+        raise ValueError("SLEB barriers must be non-negative")
+    return calibration, early, latter
+
+
+def _load_sleb_calibration_tokenizer(
+    spec: Any,
+    options: LoadOptions,
+    loaded: Any,
+) -> Any:
+    """Load the official slow tokenizer solely for SLEB calibration."""
+
+    try:
+        from transformers import AutoTokenizer
+    except ImportError as error:
+        raise RuntimeError("SLEB calibration tokenizer requires Transformers") from error
+    kwargs: dict[str, Any] = {
+        "trust_remote_code": spec.trust_remote_code,
+        "local_files_only": options.local_files_only,
+        "use_fast": False,
+    }
+    if options.cache_dir is not None:
+        kwargs["cache_dir"] = str(options.cache_dir.expanduser())
+    if not loaded.is_local:
+        kwargs["revision"] = spec.revision
+    return AutoTokenizer.from_pretrained(loaded.source, **kwargs)
+
+
 def build_manifest(args: argparse.Namespace) -> dict[str, Any]:
     request = PruningRequest(args.model, args.pruner, args.sparsity)
     spec = load_model_spec(args.model)
@@ -203,6 +279,32 @@ def build_manifest(args: argparse.Namespace) -> dict[str, Any]:
     calibration = None
     if args.pruner in {"wanda", "sparsegpt"}:
         calibration = _resolve_calibration_config(args, pruning).to_dict()
+    sleb_fields: dict[str, Any] = {}
+    if args.pruner == "sleb":
+        sleb_calibration, early, latter = _resolve_sleb_config(args, pruning)
+        original_blocks = spec.expected_num_hidden_layers
+        requested_remove = math.ceil(original_blocks * request.sparsity)
+        capacity = original_blocks - early - latter
+        if requested_remove > capacity:
+            raise ValueError(
+                f"SLEB requested_remove_count={requested_remove} exceeds "
+                f"barrier-constrained capacity={max(capacity, 0)}"
+            )
+        calibration = sleb_calibration.to_dict()
+        sleb_fields = {
+            "official_core_input": "num_remove_blocks",
+            "ratio_to_count_policy": "project_interface_ceil",
+            "target_sparsity_ratio": request.sparsity,
+            "expected_original_block_count": original_blocks,
+            "requested_remove_count": requested_remove,
+            "planned_achieved_block_sparsity": requested_remove / original_blocks,
+            "early_barrier": early,
+            "latter_barrier": latter,
+            "selection_metric": pruning["selection_metric"],
+            "selection_semantics": pruning["selection_semantics"],
+            "candidate_tie_rule": pruning["candidate_tie_rule"],
+            "greedy_iterative": pruning["greedy_iterative"],
+        }
     sparsegpt_percdamp = pruning.get("percdamp")
     sparsegpt_blocksize = pruning.get("blocksize")
     if args.pruner == "sparsegpt":
@@ -244,6 +346,7 @@ def build_manifest(args: argparse.Namespace) -> dict[str, Any]:
             "nm_sparsity": pruning.get("nm_sparsity"),
             "true_sequential": pruning.get("true_sequential"),
             "calibration": calibration,
+            **sleb_fields,
         },
         "evaluation": evaluation,
     }
@@ -293,7 +396,7 @@ def execute_experiment(args: argparse.Namespace) -> dict[str, Any]:
     """Execute a supported pruner and persist a standard HF checkpoint."""
 
     request = PruningRequest(args.model, args.pruner, args.sparsity)
-    if args.pruner not in {"magnitude", "wanda", "sparsegpt"}:
+    if args.pruner not in {"magnitude", "wanda", "sparsegpt", "sleb"}:
         raise NotImplementedError(
             f"--execute is not implemented for pruner {args.pruner!r}"
         )
@@ -313,6 +416,8 @@ def execute_experiment(args: argparse.Namespace) -> dict[str, Any]:
     if args.pruner == "sparsegpt":
         percdamp, blocksize = _resolve_sparsegpt_options(args, pruning_config)
         pruner = SparseGPTPruner(percdamp=percdamp, blocksize=blocksize)
+    elif args.pruner == "sleb":
+        pruner = None
     else:
         pruner = get_pruner(args.pruner)
     spec = load_model_spec(args.model)
@@ -325,6 +430,22 @@ def execute_experiment(args: argparse.Namespace) -> dict[str, Any]:
         calibration_samples = provider.prepare(loaded.tokenizer, calibration_config)
         context = CalibrationContext(calibration_config, calibration_samples)
         summary = pruner.prune(loaded.model, adapter, request, context)
+    elif args.pruner == "sleb":
+        sleb_config, early, latter = _resolve_sleb_config(args, pruning_config)
+        pruner = SLEBPruner(
+            early_barrier=early,
+            latter_barrier=latter,
+            calibration_config=sleb_config,
+        )
+        context = None
+        if request.sparsity != 0:
+            calibration_tokenizer = _load_sleb_calibration_tokenizer(
+                spec, options, loaded
+            )
+            provider = get_sleb_calibration_provider(sleb_config.source)
+            context = provider.prepare(calibration_tokenizer, sleb_config)
+        summary = pruner.prune(loaded.model, adapter, request, context)
+        loaded = replace(loaded, structure=adapter.get_structure(loaded.model))
     else:
         summary = pruner.prune(loaded.model, adapter, request)
 

@@ -186,26 +186,6 @@ class MagnitudeAlgorithmTests(unittest.TestCase):
 
 
 class CliValidationTests(unittest.TestCase):
-    def test_unimplemented_execute_fails_clearly(self) -> None:
-        for pruner in ("sleb",):
-            with self.subTest(pruner=pruner):
-                result = subprocess.run(
-                    [
-                        sys.executable,
-                        "scripts/run_experiment.py",
-                        "--model", "klear_agentforge_8b",
-                        "--pruner", pruner,
-                        "--sparsity", "0.2",
-                        "--execute",
-                        "--output-dir", "/tmp/not-created",
-                    ],
-                    cwd=REPOSITORY_ROOT,
-                    capture_output=True,
-                    text=True,
-                )
-                self.assertEqual(result.returncode, 3)
-                self.assertIn("not implemented", result.stderr)
-
     def test_invalid_sparsity_fails(self) -> None:
         result = subprocess.run(
             [
@@ -261,6 +241,10 @@ class CliExecuteFlowTests(unittest.TestCase):
             }
             with patch.object(module, "load_dense_model", return_value=loaded), patch.object(
                 module, "build_model_manifest", return_value=fake_model_manifest
+            ), patch.object(
+                module,
+                "_load_sleb_calibration_tokenizer",
+                side_effect=AssertionError("magnitude must not load SLEB tokenizer"),
             ):
                 manifest = module.execute_experiment(args)
             self.assertEqual(manifest["status"], "completed")

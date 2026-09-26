@@ -10,7 +10,21 @@ from .calibration import (
     get_calibration_provider,
 )
 from .magnitude import MagnitudePruner
-from .sleb import SLEBPruner
+from .sleb import (
+    SLEBPruner,
+    SLEBPruningSummary,
+    SLEBSearchResult,
+    greedy_block_search,
+    ratio_to_remove_count,
+    sleb_get_loss,
+    temporary_block_removal,
+)
+from .sleb_calibration import (
+    SLEBCalibrationConfig,
+    SLEBCalibrationContext,
+    WikiText2SLEBCalibrationProvider,
+    get_sleb_calibration_provider,
+)
 from .sparsegpt import (
     SparseGPTCoreResult,
     SparseGPTHessian,
@@ -46,6 +60,11 @@ __all__ = [
     "PRUNER_REGISTRY",
     "PruningRequest",
     "PruningSummary",
+    "SLEBCalibrationConfig",
+    "SLEBCalibrationContext",
+    "SLEBPruner",
+    "SLEBPruningSummary",
+    "SLEBSearchResult",
     "SparseGPTCoreResult",
     "SparseGPTHessian",
     "SparseGPTPruner",
@@ -53,8 +72,14 @@ __all__ = [
     "WandaActivationStats",
     "WandaPruningContext",
     "WandaPruningSummary",
+    "WikiText2SLEBCalibrationProvider",
+    "get_sleb_calibration_provider",
+    "greedy_block_search",
     "get_pruner",
     "get_calibration_provider",
     "sparsegpt_reconstruct",
+    "ratio_to_remove_count",
+    "sleb_get_loss",
+    "temporary_block_removal",
     "wanda_mask",
 ]

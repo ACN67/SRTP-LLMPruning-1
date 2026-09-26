@@ -1,4 +1,4 @@
-"""Basic configuration, registry, and placeholder smoke tests."""
+"""Basic configuration, registry, and evaluation-placeholder smoke tests."""
 
 import unittest
 from pathlib import Path
@@ -6,7 +6,7 @@ from pathlib import Path
 import yaml
 
 from src.models import get_model_adapter, list_model_ids, load_model_spec
-from src.pruning import PRUNER_REGISTRY, PruningRequest, get_pruner
+from src.pruning import PRUNER_REGISTRY, PruningRequest
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -49,11 +49,6 @@ class PrunerRegistryTests(unittest.TestCase):
             {"magnitude", "wanda", "sparsegpt", "sleb"},
         )
 
-    def test_unimplemented_pruners_are_explicit_placeholders(self) -> None:
-        request = PruningRequest("klear_agentforge_8b", "sleb", 0.3)
-        with self.assertRaises(NotImplementedError):
-            get_pruner("sleb").prune(object(), object(), request)
-
     def test_invalid_sparsity_is_rejected(self) -> None:
         with self.assertRaises(ValueError):
             PruningRequest("klear_agentforge_8b", "wanda", 1.0)
@@ -67,7 +62,7 @@ class PrunerRegistryTests(unittest.TestCase):
                 self.assertEqual(config["method"], method_id)
                 expected = (
                     "implemented"
-                    if method_id in {"magnitude", "wanda", "sparsegpt"}
+                    if method_id in {"magnitude", "wanda", "sparsegpt", "sleb"}
                     else "placeholder"
                 )
                 self.assertEqual(config["implementation_status"], expected)

@@ -476,6 +476,10 @@ class WandaCliTests(unittest.TestCase):
                 module, "get_calibration_provider", return_value=provider
             ), patch.object(
                 module, "build_model_manifest", return_value=fake_model_manifest
+            ), patch.object(
+                module,
+                "_load_sleb_calibration_tokenizer",
+                side_effect=AssertionError("Wanda must not load SLEB tokenizer"),
             ):
                 manifest = module.execute_experiment(args)
             self.assertEqual(manifest["pruning"]["pruner"], "wanda")

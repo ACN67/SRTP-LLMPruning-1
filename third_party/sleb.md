@@ -38,7 +38,7 @@ Granularity is a complete transformer decoder block. It does not prune individua
 - Calibration: required; WikiText2 or C4.
 - Activation/Hessian/gradient: no stored activation statistics, Hessian, or gradients; the criterion is full-model next-token loss.
 - Training: none.
-- Compute: high. Removing `R` blocks from `L` candidates requires roughly `R(2L-R-1)/2` candidate evaluations, excluding barriers. For 20% removal this is about 252 candidate evaluations for 36 Qwen3 blocks and 284 for 40 Granite blocks, each over the selected calibration text.
+- Compute: high. With the official 1/1 barriers, removing 8 blocks requires 244 candidate evaluations for 36 Qwen3 blocks and 276 for 40 Granite blocks, each over the selected calibration text.
 - Memory: full 8B model plus ordinary forward activations; less auxiliary matrix memory than SparseGPT, but substantially more repeated inference.
 
 ## Architecture and API assumptions
@@ -67,7 +67,7 @@ Naively saving after deleting modules is unsafe because the config still adverti
 - tokenizer/config/model save;
 - clean-process `from_pretrained` and generation tests with and without cache.
 
-Whether a depth-reduced checkpoint is fully reloadable through unmodified upstream Qwen3/Granite classes is plausible but **not verified**.
+The official repository does not verify Qwen3/Granite artifacts. This project verifies standard save/reload and generation for tiny CPU instances; real 8B artifacts remain **not verified**.
 
 ## Target-model adaptation
 
@@ -79,7 +79,7 @@ Difficulty: **High**.
 - Qwen3’s current native block forward carries shared rotary embeddings and cache positions; the old LLaMA wrapper is incompatible.
 - GQA itself is preserved if the native block remains intact, but copied forward/cache logic could break it.
 - The configured 36 blocks must be discovered rather than manually passed.
-- Use a Qwen3 adapter with an identity/bypass wrapper that preserves the expected return contract under `use_cache=False`, rather than copying the Qwen3 decoder implementation.
+- Use the Qwen3 adapter to temporarily remove a native block from the `ModuleList` under `use_cache=False`, rather than copying the Qwen3 decoder implementation.
 
 ### `ibm-granite/granite-4.2-8b` / Granite
 
@@ -92,14 +92,37 @@ Difficulty: **High**.
 
 ## Recommendation
 
-Do not copy the upstream decoder wrappers. Retain the paper’s greedy loss-based selection and removal-list semantics, but build project-owned architecture adapters that:
+Do not copy the upstream decoder wrappers. Retain the pinned official greedy loss-based selection and removal-list semantics, but build project-owned architecture adapters that:
 
 1. discover native blocks and depth;
 2. temporarily bypass a block without reimplementing its normal forward;
 3. score with `use_cache=False` using a bounded, versioned calibration corpus;
-4. physically delete selected blocks only after search;
+4. physically delete each selected block so the next greedy round scores the reduced model;
 5. update config and layer indices;
 6. verify native Hugging Face save/reload and generation.
 
 This is a reasonable wrapper/adapter adaptation of the algorithm, but it is the highest-risk method in the first implementation batch because it changes model structure and has a large search cost.
 
+## Reproduction policy
+
+The paper and released implementation differ in some execution details. This project does not attempt to explain or reconcile those differences. For reproducibility, official repository commit `d07129af60520e751087b8abb04a268a3c7ec861` is the canonical executable baseline. The paper is used for motivation, attribution, and high-level context only; no separate paper-mode implementation is provided.
+
+## Implemented official behavior
+
+- The pruning unit is one complete transformer decoder block.
+- Each round evaluates current positions in ascending order between the default early/latter barriers of 1/1, uses strict `<` comparison, permanently selects the first minimum, and dynamically re-scores the reduced model next round.
+- The core input is an explicit integer `num_remove_blocks`.
+- WikiText-2 train rows are shuffled, the first 128 rows are joined with `"\n\n"`, and the combined text is tokenized once with the official slow-tokenizer setting (`use_fast=False`). Empty and whitespace-only raw rows are preserved.
+- Selection uses whole-model next-token `CrossEntropyLoss`, batch size 1, full 2048-token chunks, multiplication by sequence length, and a sum across chunks. An incomplete tail is ignored.
+- The method is training-free and does not use gradients, Hessians, weight masks, reconstruction, or retained-weight updates.
+
+## Project compatibility adaptation
+
+- The unified ratio API maps to the official integer core input with `ceil(original_block_count * sparsity)` and records both target and achieved block sparsity.
+- SLEB calibration reloads a dedicated slow tokenizer from the dense model's resolved local source or pinned remote source/revision while preserving the same trust, locality, and cache options. Checkpoint saving continues to use the dense loader's tokenizer.
+- Qwen3 and Granite candidates are evaluated by exception-safe temporary native `ModuleList` removal; no old LLaMA/OPT decoder forward is copied.
+- Selected blocks are physically deleted, while retained native block objects and weights remain unchanged.
+- Finalization updates `config.num_hidden_layers`, subsets Qwen3 `config.layer_types` by retained original index, and reindexes attention `layer_idx`.
+- Standard Hugging Face save/reload, cached forward, and generation are validated on tiny CPU Qwen3 and Granite models.
+- The execution manifest refreshes post-pruning structure and records original/retained indices, search trace, calibration audit fields, candidate counts, and parameter reduction separately from block sparsity.
+- Real 8B, real WikiText-2, GPU, `device_map=auto`, multi-GPU, offload, near-tie stability, runtime, resource behavior, and a manifest-aware reduced-checkpoint loader for benchmark execution remain pending.
