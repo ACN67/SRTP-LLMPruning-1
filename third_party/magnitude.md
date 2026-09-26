@@ -76,3 +76,15 @@ Difficulty: **Low**.
 ## Recommendation
 
 Implement the small masking rule directly in the project after defining a shared architecture adapter and explicit target-layer policy. Do not vendor the Caffe demo or the full Wanda repository. Record both the historical paper and the Wanda baseline provenance so the experimental method is not misrepresented as the train-prune-retrain procedure from 2015.
+
+## Implemented project adaptation
+
+The project implementation is original code informed by the audited baseline; no Wanda source was copied. Version 1.0 follows Wanda's ordinary **per-Linear flattened magnitude ranking** semantics while making the selected count exact and deterministic:
+
+- targets only `torch.nn.Linear` weights returned from each adapter-enumerated transformer block;
+- flattens each Linear matrix and ranks `abs(weight)` independently from other modules;
+- uses stable `argsort` and selects exactly `floor(weight.numel() * ratio)` indices, avoiding threshold tie over-pruning;
+- applies masks on the weight's current device and preserves shape, bias, and native forward code;
+- reports requested masks separately from pre-existing and newly introduced zeros.
+
+Unlike a threshold comparison that may select too many equal-valued weights, stable exact-k selection resolves ties by row-major flattened index. This preserves the intended requested count while retaining the upstream baseline's per-Linear, non-global granularity.

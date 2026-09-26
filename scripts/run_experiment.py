@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate an experiment request and emit a reproducible planned manifest."""
+"""Plan an experiment or execute verified Magnitude Pruning."""
 
 from __future__ import annotations
 
@@ -12,19 +12,19 @@ from typing import Any
 
 import yaml
 
-
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
 from src.models import (  # noqa: E402
+    LoadOptions,
     build_model_manifest,
     get_model_adapter,
     list_model_ids,
+    load_dense_model,
     load_model_spec,
 )
-from src.pruning import PRUNER_REGISTRY  # noqa: E402
-
+from src.pruning import PRUNER_REGISTRY, PruningRequest, get_pruner  # noqa: E402
 
 CONFIG_ROOT = REPOSITORY_ROOT / "configs"
 EVAL_CONFIG_DIR = CONFIG_ROOT / "eval"
@@ -42,91 +42,241 @@ def _available_benchmarks() -> tuple[str, ...]:
     return tuple(sorted(path.stem for path in EVAL_CONFIG_DIR.glob("*.yaml")))
 
 
+def _device_map(value: str | None) -> str | dict[str, Any] | None:
+    if value is None:
+        return None
+    if value.lstrip().startswith("{"):
+        parsed = json.loads(value)
+        if not isinstance(parsed, dict):
+            raise argparse.ArgumentTypeError("JSON device_map must be an object")
+        return parsed
+    return value
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", required=True, choices=list_model_ids())
     parser.add_argument("--pruner", required=True, choices=tuple(PRUNER_REGISTRY))
     parser.add_argument("--sparsity", required=True, type=float)
-    parser.add_argument("--benchmark", required=True, choices=_available_benchmarks())
+    parser.add_argument("--benchmark", choices=_available_benchmarks())
     parser.add_argument(
         "--write-manifest",
         action="store_true",
-        help="write the planned manifest under experiments/generated",
+        help="write a planned manifest under experiments/generated",
     )
     parser.add_argument(
         "--execute",
         action="store_true",
-        help="reserved for verified model, pruning, and evaluation implementations",
+        help="load, prune, and save; currently implemented only for magnitude",
+    )
+    parser.add_argument("--local-path", type=Path)
+    parser.add_argument("--cache-dir", type=Path)
+    parser.add_argument("--dtype")
+    parser.add_argument("--device")
+    parser.add_argument(
+        "--device-map",
+        type=_device_map,
+        help="Transformers device_map string such as 'auto', or a JSON object",
+    )
+    parser.add_argument("--local-files-only", action="store_true")
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        help="external/persistent checkpoint directory; required with --execute",
+    )
+    parser.add_argument(
+        "--overwrite-output-dir",
+        action="store_true",
+        help=(
+            "allow Hugging Face save_pretrained to reuse a non-empty external "
+            "output directory without deleting it"
+        ),
     )
     return parser
 
 
-def build_manifest(args: argparse.Namespace) -> dict[str, Any]:
-    if not 0.0 <= args.sparsity < 1.0:
-        raise ValueError("--sparsity must be in the half-open interval [0, 1)")
+def _load_options(args: argparse.Namespace) -> LoadOptions:
+    return LoadOptions(
+        local_path=args.local_path,
+        cache_dir=args.cache_dir,
+        dtype=args.dtype,
+        device=args.device,
+        device_map=args.device_map,
+        local_files_only=args.local_files_only,
+    )
 
-    model = load_model_spec(args.model)
-    adapter = get_model_adapter(model)
+
+def build_manifest(args: argparse.Namespace) -> dict[str, Any]:
+    request = PruningRequest(args.model, args.pruner, args.sparsity)
+    spec = load_model_spec(args.model)
+    adapter = get_model_adapter(spec)
+    options = _load_options(args)
     model_record = build_model_manifest(
-        model,
+        spec,
         adapter,
         repository_root=REPOSITORY_ROOT,
         mode="planned_experiment",
         status="planned",
+        options=options,
     )
     created_at = model_record.pop("timestamp")
     for key in ("schema_version", "mode", "status"):
         model_record.pop(key)
     pruning = _load_yaml(CONFIG_ROOT / "pruning" / f"{args.pruner}.yaml")
-    evaluation = _load_yaml(EVAL_CONFIG_DIR / f"{args.benchmark}.yaml")
-
+    evaluation = None
+    if args.benchmark:
+        evaluation_config = _load_yaml(EVAL_CONFIG_DIR / f"{args.benchmark}.yaml")
+        evaluation = {
+            "benchmark": evaluation_config["benchmark"],
+            "implementation_status": evaluation_config["implementation_status"],
+        }
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "created_at": created_at,
         "status": "planned",
         "model": model_record,
         "pruning": {
             "method": pruning["method"],
-            "sparsity": args.sparsity,
+            "sparsity_ratio": request.sparsity,
             "implementation_status": pruning["implementation_status"],
+            "implementation_version": pruning.get("implementation_version"),
+            "pruning_type": pruning.get("structure"),
+            "scope": pruning.get("scope"),
+            "target_policy": pruning.get("target_policy"),
+            "excluded_components": pruning.get("excluded_components"),
         },
-        "evaluation": {
-            "benchmark": evaluation["benchmark"],
-            "implementation_status": evaluation["implementation_status"],
-        },
+        "evaluation": evaluation,
     }
+
+
+def _is_within(path: Path, directory: Path) -> bool:
+    return path == directory or directory in path.parents
+
+
+def _validate_output_directory(
+    output_dir: Path,
+    *,
+    local_path: Path | None,
+    overwrite: bool,
+) -> Path:
+    """Resolve and validate a checkpoint destination before model loading."""
+
+    resolved_output = output_dir.expanduser().resolve()
+    repository_root = REPOSITORY_ROOT.resolve()
+    if _is_within(resolved_output, repository_root):
+        raise ValueError(
+            f"--output-dir must be outside the Git repository: {resolved_output}"
+        )
+
+    if local_path is not None:
+        resolved_local = local_path.expanduser().resolve()
+        if _is_within(resolved_output, resolved_local) or _is_within(
+            resolved_local, resolved_output
+        ):
+            raise ValueError(
+                "--output-dir and --local-path must not be equal, nested, or overlap: "
+                f"output={resolved_output}, local={resolved_local}"
+            )
+
+    if resolved_output.exists():
+        if not resolved_output.is_dir():
+            raise ValueError(f"--output-dir exists and is not a directory: {resolved_output}")
+        if next(resolved_output.iterdir(), None) is not None and not overwrite:
+            raise ValueError(
+                "--output-dir is non-empty; choose an empty directory or explicitly "
+                "pass --overwrite-output-dir"
+            )
+    return resolved_output
+
+
+def execute_experiment(args: argparse.Namespace) -> dict[str, Any]:
+    """Execute a supported pruner and persist a standard HF checkpoint."""
+
+    request = PruningRequest(args.model, args.pruner, args.sparsity)
+    if args.pruner != "magnitude":
+        raise NotImplementedError(
+            f"--execute is not implemented for pruner {args.pruner!r}"
+        )
+    if args.benchmark is not None:
+        raise NotImplementedError(
+            "benchmark execution is not implemented; omit --benchmark with --execute"
+        )
+    if args.output_dir is None:
+        raise ValueError("--output-dir is required with --execute")
+
+    output_dir = _validate_output_directory(
+        args.output_dir,
+        local_path=args.local_path,
+        overwrite=args.overwrite_output_dir,
+    )
+    spec = load_model_spec(args.model)
+    adapter = get_model_adapter(spec)
+    options = _load_options(args)
+    loaded = load_dense_model(spec, adapter, options)
+    summary = get_pruner(args.pruner).prune(loaded.model, adapter, request)
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    loaded.model.save_pretrained(output_dir)
+    loaded.tokenizer.save_pretrained(output_dir)
+
+    model_record = build_model_manifest(
+        spec,
+        adapter,
+        repository_root=REPOSITORY_ROOT,
+        mode="magnitude_pruning",
+        status="completed",
+        options=options,
+        loaded=loaded,
+    )
+    manifest = {
+        "schema_version": 3,
+        "created_at": model_record.pop("timestamp"),
+        "status": "completed",
+        "model": model_record,
+        "pruning": summary.to_dict(),
+        "checkpoint": {
+            "format": "huggingface_save_pretrained",
+            "path": str(output_dir),
+            "model_saved": True,
+            "tokenizer_saved": True,
+        },
+        "evaluation": None,
+    }
+    (output_dir / "pruning_manifest.json").write_text(
+        json.dumps(manifest, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    return manifest
+
+
+def _write_planned_manifest(args: argparse.Namespace, rendered: str) -> Path:
+    output_dir = REPOSITORY_ROOT / "experiments" / "generated"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    benchmark = f"_{args.benchmark}" if args.benchmark else ""
+    output_path = output_dir / (
+        f"{timestamp}_{args.model}_{args.pruner}{benchmark}_s{args.sparsity:g}.json"
+    )
+    output_path.write_text(rendered + "\n", encoding="utf-8")
+    return output_path
 
 
 def main() -> int:
     args = _parser().parse_args()
     try:
-        manifest = build_manifest(args)
-    except (KeyError, TypeError, ValueError) as error:
-        print(f"configuration error: {error}", file=sys.stderr)
-        return 2
-
-    if args.execute:
-        print(
-            "execution is unavailable: model loading, pruning, and evaluation are placeholders",
-            file=sys.stderr,
-        )
+        manifest = execute_experiment(args) if args.execute else build_manifest(args)
+    except NotImplementedError as error:
+        print(f"execution unavailable: {error}", file=sys.stderr)
         return 3
+    except Exception as error:
+        print(f"experiment failed: {type(error).__name__}: {error}", file=sys.stderr)
+        return 2
 
     rendered = json.dumps(manifest, indent=2, ensure_ascii=False)
     print(rendered)
-
-    if args.write_manifest:
-        output_dir = REPOSITORY_ROOT / "experiments" / "generated"
-        output_dir.mkdir(parents=True, exist_ok=True)
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        filename = (
-            f"{timestamp}_{args.model}_{args.pruner}_{args.benchmark}_"
-            f"s{args.sparsity:g}.json"
-        )
-        output_path = output_dir / filename
-        output_path.write_text(rendered + "\n", encoding="utf-8")
+    if args.write_manifest and not args.execute:
+        output_path = _write_planned_manifest(args, rendered)
         print(f"manifest written to {output_path.relative_to(REPOSITORY_ROOT)}")
-
     return 0
 
 

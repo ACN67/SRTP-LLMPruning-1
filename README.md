@@ -1,6 +1,6 @@
 # SRTP LLM Pruning
 
-Empirical study scaffold for comparing structured and unstructured LLM pruning methods on code-generation benchmarks. The current repository establishes reproducible configuration, model-adapter, pruning, evaluation, and experiment-record interfaces; it does **not** yet implement the paper algorithms.
+Empirical study scaffold for comparing structured and unstructured LLM pruning methods on code-generation benchmarks. Dense model loading and the first verified baseline, Magnitude Pruning, are implemented. Wanda, SparseGPT, SLEB, and benchmark execution remain placeholders.
 
 ## Initial study matrix
 
@@ -20,7 +20,7 @@ Model brand and architecture are represented separately. Hugging Face repository
 ```text
 configs/          Model, pruning, and evaluation YAML configurations
 src/models/       Model specifications, registry, and architecture adapters
-src/pruning/      Shared pruner interface and method placeholders
+src/pruning/      Shared pruner interface and Magnitude implementation
 src/evaluation/   Future benchmark runners
 src/utils/        Shared utilities
 scripts/          Setup/pruning/evaluation helpers and the unified entry point
@@ -43,7 +43,15 @@ python -m pip install -r requirements.txt
 python -m unittest discover -s tests -v
 ```
 
-The dependencies provide the future model-loading environment, but the current smoke tests neither download nor load an 8B model.
+Tests instantiate tiny random Qwen3 and Granite models locally; they do not download or load an 8B model.
+
+## Magnitude Pruning
+
+The implemented baseline is deterministic **per-module (layer-wise) unstructured magnitude pruning**. For every `torch.nn.Linear` weight inside adapter-enumerated transformer blocks, it flattens and ranks `abs(weight)` over that complete matrix, then zeros exactly `floor(weight.numel() * sparsity_ratio)` entries. Each Linear is handled independently; pruning is not global across modules. Stable sorting resolves ties by row-major flattened index. Tensor shapes and biases are unchanged.
+
+Embeddings, final/all norms, `lm_head`, biases, and every parameter outside transformer blocks are excluded. The summary distinguishes targeted weights, requested mask positions, pre-existing zeros, newly zeroed weights, and post-pruning zeros, both globally and per module.
+
+The test suite validates the algorithm with toy models and with genuine tiny `Qwen3ForCausalLM` and `GraniteForCausalLM` instances, including forward and standard Hugging Face save/reload. This is algorithm- and architecture-level validation only; both configured 8B checkpoints remain pending GPU validation.
 
 ## Dense model validation
 
@@ -69,7 +77,7 @@ Use `--local-path /data/models/<directory>` to override the Hugging Face source.
 
 ## Unified experiment entry point
 
-The current CLI validates IDs and configuration, then prints a planned manifest:
+The CLI prints a planned manifest without loading weights:
 
 ```bash
 python scripts/run_experiment.py \
@@ -79,7 +87,20 @@ python scripts/run_experiment.py \
   --benchmark humaneval
 ```
 
-Add `--write-manifest` to save the plan under `experiments/generated/`. The manifest records the full Hugging Face repository ID, project model ID, requested revision, and a `resolved_revision` field. The latter remains `null` until a future loader resolves the immutable Hugging Face commit. `--execute` currently fails deliberately because the pruning and evaluation implementations have not been verified.
+Add `--write-manifest` to save the plan under `experiments/generated/`. To execute Magnitude on a suitable GPU host and save a standard Hugging Face model/tokenizer checkpoint plus `pruning_manifest.json`:
+
+```bash
+python scripts/run_experiment.py \
+  --model klear_agentforge_8b \
+  --pruner magnitude \
+  --sparsity 0.20 \
+  --execute \
+  --device-map auto \
+  --cache-dir /data/cache \
+  --output-dir /data/checkpoints/klear_agentforge_8b/magnitude/s020
+```
+
+`--output-dir` is mandatory for execution and must point to external persistent storage. Paths inside the Git repository and paths equal to, above, or below a `--local-path` dense source are rejected. Existing non-empty output directories are rejected by default; `--overwrite-output-dir` explicitly permits Hugging Face to reuse a safe external non-empty directory, but does not delete its existing contents and does not bypass either path restriction. Benchmark flags cannot be combined with execution yet. Wanda, SparseGPT, and SLEB deliberately fail if passed with `--execute`.
 
 ## Docker and persistent data
 

@@ -1,6 +1,6 @@
-"""Pruning interfaces and registered method placeholders."""
+"""Pruning interfaces and registered methods."""
 
-from .base import BasePruner, PruningRequest
+from .base import BasePruner, ModulePruningStats, PruningRequest, PruningSummary
 from .magnitude import MagnitudePruner
 from .sleb import SLEBPruner
 from .sparsegpt import SparseGPTPruner
@@ -22,4 +22,11 @@ def get_pruner(method_id: str) -> BasePruner:
         raise KeyError(f"Unknown pruner {method_id!r}; available: {available}") from error
 
 
-__all__ = ["BasePruner", "PRUNER_REGISTRY", "PruningRequest", "get_pruner"]
+__all__ = [
+    "BasePruner",
+    "ModulePruningStats",
+    "PRUNER_REGISTRY",
+    "PruningRequest",
+    "PruningSummary",
+    "get_pruner",
+]

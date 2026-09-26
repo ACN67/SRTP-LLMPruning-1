@@ -2,4 +2,16 @@ method: magnitude
 display_name: Magnitude Pruning
 default_sparsity: 0.3
 structure: unstructured
-implementation_status: placeholder
+scope: per_module_flattened
+score: absolute_weight
+rounding: floor_per_module
+target_policy: linear_weights_inside_transformer_blocks
+excluded_components:
+  - token_embeddings
+  - final_norm
+  - all_norm_parameters
+  - lm_head
+  - bias
+  - parameters_outside_blocks
+implementation_version: "1.0"
+implementation_status: implemented
