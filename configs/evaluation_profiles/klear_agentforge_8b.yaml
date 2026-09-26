@@ -1,0 +1,35 @@
+project_model_id: klear_agentforge_8b
+profile_version: 2
+source: pinned model generation_config plus SRTP benchmark choices
+benchmarks:
+  humaneval:
+    profile_id: klear_humaneval_greedy_chat_v2
+    use_chat_template: true
+    chat_template_kwargs: {}
+    do_sample: false
+    temperature: null
+    top_p: null
+    top_k: null
+    max_new_tokens: 512
+    num_trials: 1
+  mbpp:
+    profile_id: klear_mbpp_greedy_chat_v2
+    use_chat_template: true
+    chat_template_kwargs: {}
+    do_sample: false
+    temperature: null
+    top_p: null
+    top_k: null
+    max_new_tokens: 512
+    num_trials: 1
+  livecodebench:
+    profile_id: klear_lcb_v6_sampling_chat_v2
+    use_chat_template: true
+    chat_template_kwargs: {}
+    do_sample: true
+    temperature: 0.6
+    top_p: 0.95
+    top_k: 20
+    max_new_tokens: 4096
+    max_new_tokens_source: SRTP conservative code-generation budget
+    num_trials: 1

@@ -1,5 +1,17 @@
 benchmark: livecodebench
-display_name: LiveCodeBench
-implementation_status: placeholder
-dataset_path: null
-cache_dir: /data/cache/benchmarks/livecodebench
+display_name: LiveCodeBench v6
+implementation_status: implemented
+source_repo: https://github.com/LiveCodeBench/LiveCodeBench
+source_revision: 28fef95ea8c9f7a547c8329f2cd3d32b92c1fa24
+license: MIT
+dataset_id: livecodebench/code_generation_lite
+dataset_revision: 0fe84c3912ea0c4d4a78037083943e8f0c4dd505
+dataset_file: test6.jsonl
+dataset_sha256: bb4c364f71921c4495a6ad15abe1a927350b720009f4933e2e71f8af0f6fd1f5
+release_version: v6
+scenario: codegeneration
+expected_task_count: 175
+metric: pass@1
+prompt_protocol: lcb_codegen_prompt_v1
+code_extraction_protocol: lcb_code_extraction_v1
+dataset_path: /data/datasets/livecodebench/v6/test6.jsonl

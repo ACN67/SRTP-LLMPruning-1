@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "project_model_id": "klear_agentforge_8b",
+  "canonical_hf_repo": "Kwai-Klear/Klear-AgentForge-8B",
+  "canonical_hf_revision": "fa3d41e92e9ce7a5b4a52a3e7439aa00521f40c9",
+  "domestic_modelscope_repo": "Kwai-Klear/Klear-AgentForge-8B",
+  "required_runtime_files": [
+    {"path": "config.json", "size": 1571, "hash_type": "git_blob_sha1", "expected_hash": "e71b58e1b4eeaec439c576a7540176e12813f3a2"},
+    {"path": "generation_config.json", "size": 214, "hash_type": "git_blob_sha1", "expected_hash": "e58a45f48b34e768f767bba26fb351540059f0fe"},
+    {"path": "added_tokens.json", "size": 707, "hash_type": "git_blob_sha1", "expected_hash": "b54f9135e44c1e81047e8d05cb027af8bc039eed"},
+    {"path": "merges.txt", "size": 1671853, "hash_type": "git_blob_sha1", "expected_hash": "31349551d90c7606f325fe0f11bbb8bd5fa0d7c7"},
+    {"path": "special_tokens_map.json", "size": 613, "hash_type": "git_blob_sha1", "expected_hash": "ac23c0aaa2434523c494330aeb79c58395378103"},
+    {"path": "tokenizer.json", "size": 11422654, "hash_type": "sha256", "expected_hash": "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4"},
+    {"path": "tokenizer_config.json", "size": 9575, "hash_type": "git_blob_sha1", "expected_hash": "54a310737196b27e5ffe7264d7f8999d87ecb2f7"},
+    {"path": "vocab.json", "size": 2776833, "hash_type": "git_blob_sha1", "expected_hash": "4783fe10ac3adce15ac8f358ef5462739852c569"},
+    {"path": "model.safetensors.index.json", "size": 32878, "hash_type": "git_blob_sha1", "expected_hash": "10c7a17197289024c4b2801e53b9662e95f5ad83"},
+    {"path": "model-00001-of-00004.safetensors", "size": 4902257696, "hash_type": "sha256", "expected_hash": "67daf030b4b72608eb63242f40d6cab3538b9010ce485e321e8737308f502798"},
+    {"path": "model-00002-of-00004.safetensors", "size": 4915960368, "hash_type": "sha256", "expected_hash": "26c45f4631e9f8071464059e8dcd799d4159ac483528958b87e5ba93a9a05e1f"},
+    {"path": "model-00003-of-00004.safetensors", "size": 4983068496, "hash_type": "sha256", "expected_hash": "5062985e8fde0531a1f9cc63da0391405916d5b8fbb11d414b32fb03a5130f51"},
+    {"path": "model-00004-of-00004.safetensors", "size": 1580230264, "hash_type": "sha256", "expected_hash": "8fbc432ff26f23949be8b606755a10b33f03cc5e7f563794dc8d97aae2b9d6d6"}
+  ]
+}

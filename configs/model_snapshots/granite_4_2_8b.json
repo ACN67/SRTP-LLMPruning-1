@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "project_model_id": "granite_4_2_8b",
+  "canonical_hf_repo": "ibm-granite/granite-4.2-8b",
+  "canonical_hf_revision": "f8de16cdcdbc6c779ca517604e050d82cc119e44",
+  "domestic_modelscope_repo": "ibm-granite/granite-4.2-8b",
+  "required_runtime_files": [
+    {"path": "config.json", "size": 907, "hash_type": "git_blob_sha1", "expected_hash": "e044486e59a3ede61ff23123a282a71172e09cff"},
+    {"path": "generation_config.json", "size": 207, "hash_type": "git_blob_sha1", "expected_hash": "f1d6b1b535c3ea39049147eed933e58ed696bf0c"},
+    {"path": "chat_template.jinja", "size": 9013, "hash_type": "git_blob_sha1", "expected_hash": "e5c9466d5347257b44a8991b3d24219bf9c0ad1b"},
+    {"path": "merges.txt", "size": 916646, "hash_type": "git_blob_sha1", "expected_hash": "354558edcdbd64ca7abd407b8be3d5d09d39d781"},
+    {"path": "special_tokens_map.json", "size": 563, "hash_type": "git_blob_sha1", "expected_hash": "0451f37912edb7f8a4bf04d77eef13f6130f0515"},
+    {"path": "tokenizer.json", "size": 7153414, "hash_type": "git_blob_sha1", "expected_hash": "109016081083c2a3bba91a2111acb68656426fde"},
+    {"path": "tokenizer_config.json", "size": 17677, "hash_type": "git_blob_sha1", "expected_hash": "57e792da3e95fb4b48532fd6f477d35ebd479947"},
+    {"path": "vocab.json", "size": 1612694, "hash_type": "git_blob_sha1", "expected_hash": "84ef8a6659903667ca5f5787624f4ed8b05ef7c1"},
+    {"path": "model.safetensors.index.json", "size": 31357, "hash_type": "git_blob_sha1", "expected_hash": "8737d34d62bd21a22d69f6d87703751dfac6d7b2"},
+    {"path": "model-00001-of-00004.safetensors", "size": 5335320208, "hash_type": "sha256", "expected_hash": "baed4f3128d1f2e3792ad896ac5621124929bb4f658722f132e614108751e96c"},
+    {"path": "model-00002-of-00004.safetensors", "size": 5285049768, "hash_type": "sha256", "expected_hash": "69e7a59b810f4c029339b7a208b4dac0c1eee6b88a66e830e74882cbd191803c"},
+    {"path": "model-00003-of-00004.safetensors", "size": 5360555872, "hash_type": "sha256", "expected_hash": "c2c52fd2baa6ec5003d3ac9842bfd782c0a5a80fc9a1b406a007cae6af008a89"},
+    {"path": "model-00004-of-00004.safetensors", "size": 1602302184, "hash_type": "sha256", "expected_hash": "0dfcc074193c1cb81270fd6e99cace27d4b0461e8739691c2a347b657c030ffc"}
+  ]
+}

@@ -21,6 +21,12 @@ experiments/generated
 *.ckpt
 *.gguf
 *.log
+*.tar
+*.tar.gz
+*.tar.zst
 .env*
+secrets
+*.key
+*.token
 wandb
 mlruns

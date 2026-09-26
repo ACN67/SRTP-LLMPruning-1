@@ -1,5 +1,16 @@
 benchmark: mbpp
 display_name: MBPP
-implementation_status: placeholder
-dataset_path: null
-cache_dir: /data/cache/benchmarks/mbpp
+implementation_status: implemented
+source_repo: https://github.com/google-research/google-research
+source_revision: d36068b845da4c2b24927fee2cea1e6ef98dadda
+source_file: mbpp/mbpp.jsonl
+source_sha256: ccf64ceae9c5403bf50a044cb6d505bfd2a2963ee58338ba268fd65beab92a9f
+evaluator_reference_revision: 8fc5bae6479c4fbbb28c3f8b644f6a15b3f3b5bd
+prompt_reference_repo: https://github.com/evalplus/evalplus
+prompt_reference_revision: 26d6d00bb1fd0fa37f39c99d5290da67891d1c5e
+expected_task_count: 500
+task_id_range: [11, 510]
+metric: pass@1
+prompt_protocol: mbpp_prompt_v1
+code_extraction_protocol: code_extraction_v1
+dataset_path: /data/datasets/mbpp/mbpp.jsonl

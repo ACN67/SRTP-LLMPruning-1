@@ -1,4 +1,4 @@
-"""Basic configuration, registry, and evaluation-placeholder smoke tests."""
+"""Basic configuration and registry smoke tests."""
 
 import unittest
 from pathlib import Path
@@ -78,8 +78,11 @@ class EvaluationConfigTests(unittest.TestCase):
                 with (config_dir / f"{benchmark_id}.yaml").open(encoding="utf-8") as handle:
                     config = yaml.safe_load(handle)
                 self.assertEqual(config["benchmark"], benchmark_id)
-                self.assertEqual(config["implementation_status"], "placeholder")
-
+                self.assertEqual(config["implementation_status"], "implemented")
+                self.assertEqual(config["metric"], "pass@1")
+                self.assertGreater(config["expected_task_count"], 0)
+                self.assertNotIn("max_new_tokens", config)
+                self.assertNotIn("generation_protocol", config)
 
 if __name__ == "__main__":
     unittest.main()

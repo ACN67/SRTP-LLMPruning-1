@@ -1,3 +1,3 @@
-# Experiments
+# 实验定义
 
-Commit reproducible experiment definitions and manifests here. Generated plans are written to `generated/` when `--write-manifest` is used. Do not store weights, checkpoints, datasets, or large logs here.
+这里存放可复现的实验定义与 manifest。使用 `--write-manifest` 时，计划文件写入 `generated/`。不要把权重、checkpoint、dataset 或大型日志放入本目录。

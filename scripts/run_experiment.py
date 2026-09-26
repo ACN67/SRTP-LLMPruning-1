@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import sys
@@ -26,15 +27,19 @@ from src.models import (  # noqa: E402
     load_dense_model,
     load_model_spec,
 )
+from src.evaluation import load_evaluation_profile  # noqa: E402
+from src.calibration_assets import load_local_c4, load_local_wikitext2  # noqa: E402
 from src.pruning import (  # noqa: E402
     PRUNER_REGISTRY,
     CalibrationContext,
     CalibrationConfig,
+    C4CalibrationProvider,
     PruningRequest,
     SLEBCalibrationConfig,
     SLEBCalibrationContext,
     SLEBPruner,
     SparseGPTPruner,
+    WikiText2SLEBCalibrationProvider,
     get_calibration_provider,
     get_pruner,
     get_sleb_calibration_provider,
@@ -93,6 +98,10 @@ def _parser() -> argparse.ArgumentParser:
         help="Transformers device_map string such as 'auto', or a JSON object",
     )
     parser.add_argument("--local-files-only", action="store_true")
+    parser.add_argument(
+        "--datasets-root", type=Path, default=Path("/data/datasets"),
+        help="root containing pre-materialized calibration datasets",
+    )
     parser.add_argument(
         "--calibration-source",
         choices=("c4", "wikitext2"),
@@ -314,9 +323,17 @@ def build_manifest(args: argparse.Namespace) -> dict[str, Any]:
     evaluation = None
     if args.benchmark:
         evaluation_config = _load_yaml(EVAL_CONFIG_DIR / f"{args.benchmark}.yaml")
+        profile = load_evaluation_profile(args.model, args.benchmark)
         evaluation = {
             "benchmark": evaluation_config["benchmark"],
             "implementation_status": evaluation_config["implementation_status"],
+            "source_revision": evaluation_config["source_revision"],
+            "dataset_revision": evaluation_config.get("dataset_revision"),
+            "release": evaluation_config.get("release_version"),
+            "task_count": evaluation_config["expected_task_count"],
+            "metric": evaluation_config["metric"],
+            "prompt_protocol": evaluation_config["prompt_protocol"],
+            "evaluation_profile": profile.to_dict(),
         }
     return {
         "schema_version": 3,
@@ -426,7 +443,10 @@ def execute_experiment(args: argparse.Namespace) -> dict[str, Any]:
     loaded = load_dense_model(spec, adapter, options)
     if args.pruner in {"wanda", "sparsegpt"}:
         calibration_config = _resolve_calibration_config(args, pruning_config)
-        provider = get_calibration_provider(calibration_config.source)
+        if args.local_files_only:
+            provider = C4CalibrationProvider(lambda: load_local_c4(args.datasets_root))
+        else:
+            provider = get_calibration_provider(calibration_config.source)
         calibration_samples = provider.prepare(loaded.tokenizer, calibration_config)
         context = CalibrationContext(calibration_config, calibration_samples)
         summary = pruner.prune(loaded.model, adapter, request, context)
@@ -442,7 +462,12 @@ def execute_experiment(args: argparse.Namespace) -> dict[str, Any]:
             calibration_tokenizer = _load_sleb_calibration_tokenizer(
                 spec, options, loaded
             )
-            provider = get_sleb_calibration_provider(sleb_config.source)
+            if args.local_files_only:
+                provider = WikiText2SLEBCalibrationProvider(
+                    lambda: load_local_wikitext2(args.datasets_root)
+                )
+            else:
+                provider = get_sleb_calibration_provider(sleb_config.source)
             context = provider.prepare(calibration_tokenizer, sleb_config)
         summary = pruner.prune(loaded.model, adapter, request, context)
         loaded = replace(loaded, structure=adapter.get_structure(loaded.model))
@@ -462,6 +487,15 @@ def execute_experiment(args: argparse.Namespace) -> dict[str, Any]:
         options=options,
         loaded=loaded,
     )
+    if args.local_path is not None:
+        sidecar_path = args.local_path.expanduser().resolve() / ".srtp_model_source.json"
+        if sidecar_path.is_file():
+            model_record["source_snapshot_provenance"] = json.loads(
+                sidecar_path.read_text(encoding="utf-8")
+            )
+            model_record["source_snapshot_sidecar_sha256"] = hashlib.sha256(
+                sidecar_path.read_bytes()
+            ).hexdigest()
     manifest = {
         "schema_version": 3,
         "created_at": model_record.pop("timestamp"),

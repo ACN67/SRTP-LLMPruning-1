@@ -209,6 +209,25 @@ tempCodeRunnerFile.py
 # PyPI configuration file
 .pypirc
 
+# Large reproducibility artifacts
+models/
+datasets/
+checkpoints/
+results/
+weights/
+*.tar
+*.tar.gz
+*.tar.zst
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.ckpt
+*.gguf
+secrets/
+*.key
+*.token
+
 # Marimo
 marimo/_static/
 marimo/_lsp/
