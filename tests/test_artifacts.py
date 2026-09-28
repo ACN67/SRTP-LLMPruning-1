@@ -117,29 +117,31 @@ class ArtifactLoaderTests(unittest.TestCase):
                 loaded = self._load(spec, adapter, Path(directory))
                 self.assertEqual(loaded.structure["actual_block_count"], 3)
 
-    def test_sleb_reduced_qwen_and_granite_load_forward_and_generate(self):
-        for kind in ("qwen", "granite"):
-            model, adapter, spec = tiny_pair(kind)
-            metadata = adapter.capture_block_removal_metadata(model)
-            blocks = list(adapter.get_blocks(model))
-            adapter.replace_blocks(model, [blocks[0], blocks[2]])
-            adapter.finalize_block_removal(model, (0, 2), metadata)
-            with tempfile.TemporaryDirectory() as directory:
-                model.save_pretrained(directory)
-                Path(directory, "pruning_manifest.json").write_text(
-                    json.dumps(manifest(spec, adapter, "sleb", 2)), encoding="utf-8"
-                )
-                loaded = self._load(spec, adapter, Path(directory))
-                ids = torch.tensor([[1, 2, 3]])
-                with torch.inference_mode():
-                    logits = loaded.model(input_ids=ids, use_cache=False).logits
-                    generated = loaded.model.generate(
-                        input_ids=ids, max_new_tokens=1, do_sample=False,
-                        pad_token_id=0, use_cache=True,
-                    )
-            self.assertEqual(loaded.structure["actual_block_count"], 2)
-            self.assertEqual(logits.shape[:2], ids.shape)
-            self.assertEqual(generated.shape, (1, 4))
+    def test_reduced_qwen_and_granite_load_forward_and_generate(self):
+        for pruner in ("sleb", "tabp"):
+            for kind in ("qwen", "granite"):
+                with self.subTest(pruner=pruner, kind=kind):
+                    model, adapter, spec = tiny_pair(kind)
+                    metadata = adapter.capture_block_removal_metadata(model)
+                    blocks = list(adapter.get_blocks(model))
+                    adapter.replace_blocks(model, [blocks[0], blocks[2]])
+                    adapter.finalize_block_removal(model, (0, 2), metadata)
+                    with tempfile.TemporaryDirectory() as directory:
+                        model.save_pretrained(directory)
+                        Path(directory, "pruning_manifest.json").write_text(
+                            json.dumps(manifest(spec, adapter, pruner, 2)), encoding="utf-8"
+                        )
+                        loaded = self._load(spec, adapter, Path(directory))
+                        ids = torch.tensor([[1, 2, 3]])
+                        with torch.inference_mode():
+                            logits = loaded.model(input_ids=ids, use_cache=False).logits
+                            generated = loaded.model.generate(
+                                input_ids=ids, max_new_tokens=1, do_sample=False,
+                                pad_token_id=0, use_cache=True,
+                            )
+                    self.assertEqual(loaded.structure["actual_block_count"], 2)
+                    self.assertEqual(logits.shape[:2], ids.shape)
+                    self.assertEqual(generated.shape, (1, 4))
 
     def test_missing_manifest_is_rejected(self):
         model, adapter, spec = tiny_pair("qwen")

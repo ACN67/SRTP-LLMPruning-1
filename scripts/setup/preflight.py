@@ -81,7 +81,9 @@ def software_check() -> dict:
     for relative in ("src", "scripts", "configs", "tests", "third_party"):
         if not (REPOSITORY_ROOT / relative).is_dir():
             raise RuntimeError(f"Project directory is missing: {relative}")
-    if set(PRUNER_REGISTRY) != {"magnitude", "wanda", "sparsegpt", "sleb"}:
+    if set(PRUNER_REGISTRY) != {
+        "magnitude", "wanda", "sparsegpt", "sleb", "tabp"
+    }:
         raise RuntimeError("Pruner registry does not match the server-ready contract")
     return {
         "status": "pass",

@@ -1,6 +1,7 @@
 """Pruning interfaces and registered methods."""
 
 from .base import BasePruner, ModulePruningStats, PruningRequest, PruningSummary
+from .block_removal import ratio_to_block_count, remove_blocks, retained_indices
 from .calibration import (
     C4CalibrationProvider,
     CalibrationContext,
@@ -32,6 +33,28 @@ from .sparsegpt import (
     SparseGPTPruningSummary,
     sparsegpt_reconstruct,
 )
+from .tabp import (
+    MEASURE_DIRECTION,
+    SUPPORTED_SSN_MEASURES,
+    SUPPORTED_TABP_MEASURES,
+    TaBPPruner,
+    TaBPPruningSummary,
+    TaBPRanking,
+    aggregate_ddf_scores,
+    aggregate_ssn_scores,
+    rank_blocks_ddf,
+    rank_blocks_ssn,
+)
+from .tabp_calibration import (
+    ARC_EASY_REVISION,
+    ARCEasyTaBPCalibrationProvider,
+    TaBPCalibrationConfig,
+    TaBPCalibrationContext,
+    TaBPCalibrationSample,
+    WikiTextTaBPCalibrationProvider,
+    format_arc_easy,
+    get_tabp_calibration_provider,
+)
 from .wanda import WandaActivationStats, WandaPruner, WandaPruningSummary, wanda_mask
 
 PRUNER_REGISTRY: dict[str, type[BasePruner]] = {
@@ -39,6 +62,7 @@ PRUNER_REGISTRY: dict[str, type[BasePruner]] = {
     "wanda": WandaPruner,
     "sparsegpt": SparseGPTPruner,
     "sleb": SLEBPruner,
+    "tabp": TaBPPruner,
 }
 
 
@@ -65,19 +89,40 @@ __all__ = [
     "SLEBPruner",
     "SLEBPruningSummary",
     "SLEBSearchResult",
+    "SUPPORTED_SSN_MEASURES",
+    "SUPPORTED_TABP_MEASURES",
+    "MEASURE_DIRECTION",
     "SparseGPTCoreResult",
     "SparseGPTHessian",
     "SparseGPTPruner",
     "SparseGPTPruningSummary",
+    "TaBPCalibrationConfig",
+    "TaBPCalibrationContext",
+    "TaBPCalibrationSample",
+    "TaBPPruner",
+    "TaBPPruningSummary",
+    "TaBPRanking",
+    "aggregate_ddf_scores",
+    "aggregate_ssn_scores",
     "WandaActivationStats",
     "WandaPruningContext",
     "WandaPruningSummary",
     "WikiText2SLEBCalibrationProvider",
+    "ARC_EASY_REVISION",
+    "ARCEasyTaBPCalibrationProvider",
+    "WikiTextTaBPCalibrationProvider",
+    "format_arc_easy",
     "get_sleb_calibration_provider",
+    "get_tabp_calibration_provider",
     "greedy_block_search",
     "get_pruner",
     "get_calibration_provider",
     "sparsegpt_reconstruct",
+    "rank_blocks_ssn",
+    "rank_blocks_ddf",
+    "ratio_to_block_count",
+    "remove_blocks",
+    "retained_indices",
     "ratio_to_remove_count",
     "sleb_get_loss",
     "temporary_block_removal",

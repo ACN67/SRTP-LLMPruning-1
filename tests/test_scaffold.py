@@ -51,7 +51,7 @@ class PrunerRegistryTests(unittest.TestCase):
     def test_expected_pruners_are_registered(self) -> None:
         self.assertEqual(
             set(PRUNER_REGISTRY),
-            {"magnitude", "wanda", "sparsegpt", "sleb"},
+            {"magnitude", "wanda", "sparsegpt", "sleb", "tabp"},
         )
 
     def test_invalid_sparsity_is_rejected(self) -> None:
@@ -67,7 +67,7 @@ class PrunerRegistryTests(unittest.TestCase):
                 self.assertEqual(config["method"], method_id)
                 expected = (
                     "implemented"
-                    if method_id in {"magnitude", "wanda", "sparsegpt", "sleb"}
+                    if method_id in {"magnitude", "wanda", "sparsegpt", "sleb", "tabp"}
                     else "placeholder"
                 )
                 self.assertEqual(config["implementation_status"], expected)

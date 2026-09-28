@@ -11,7 +11,7 @@ import sys
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import yaml
 
@@ -39,10 +39,14 @@ from src.pruning import (  # noqa: E402
     SLEBCalibrationContext,
     SLEBPruner,
     SparseGPTPruner,
+    SUPPORTED_TABP_MEASURES,
+    TaBPCalibrationConfig,
+    TaBPPruner,
     WikiText2SLEBCalibrationProvider,
     get_calibration_provider,
     get_pruner,
     get_sleb_calibration_provider,
+    get_tabp_calibration_provider,
 )
 
 CONFIG_ROOT = REPOSITORY_ROOT / "configs"
@@ -104,8 +108,8 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--calibration-source",
-        choices=("c4", "wikitext2"),
-        help="calibration source: C4 for Wanda/SparseGPT, WikiText-2 for SLEB",
+        choices=("c4", "wikitext2", "arc_easy", "wikitext"),
+        help="method-specific calibration source",
     )
     parser.add_argument(
         "--calibration-samples",
@@ -144,6 +148,31 @@ def _parser() -> argparse.ArgumentParser:
         "--sleb-latter-barrier",
         type=int,
         help="SLEB protected current blocks at the end (official default: 1)",
+    )
+    parser.add_argument(
+        "--tabp-ranking-strategy",
+        choices=("ssn", "ddf"),
+        help="TaBP internal ranking strategy (project default: ssn)",
+    )
+    parser.add_argument(
+        "--tabp-mode",
+        choices=("latter", "whole"),
+        help="TaBP candidate scope (official default: latter)",
+    )
+    parser.add_argument(
+        "--tabp-measure",
+        choices=tuple(sorted(SUPPORTED_TABP_MEASURES)),
+        help="TaBP block-output distribution statistic",
+    )
+    parser.add_argument(
+        "--tabp-lm-head-type",
+        choices=("frozen", "trained"),
+        help="trained requires compatible upstream per-block checkpoints and is rejected here",
+    )
+    parser.add_argument(
+        "--tabp-dataset-path",
+        type=Path,
+        help="optional local datasets save_to_disk path for ARC-Easy",
     )
     parser.add_argument(
         "--output-dir",
@@ -245,6 +274,52 @@ def _resolve_sleb_config(
     return calibration, early, latter
 
 
+def _resolve_tabp_config(
+    args: argparse.Namespace,
+    pruning: dict[str, Any],
+) -> tuple[TaBPCalibrationConfig, str, str, str, str]:
+    source = getattr(args, "calibration_source", None) or pruning["calibration_source"]
+    task_type = "text_generation" if source == "wikitext" else pruning["calibration_task_type"]
+    sampling = (
+        "concatenate_train_double_newline"
+        if source == "wikitext"
+        else pruning["calibration_sampling_semantics"]
+    )
+    calibration = TaBPCalibrationConfig(
+        source=source,
+        dataset_revision=(pruning["calibration_dataset_revision"] if source == "arc_easy" else None),
+        task_type=task_type,
+        samples=(
+            args.calibration_samples
+            if getattr(args, "calibration_samples", None) is not None
+            else int(pruning["calibration_samples"])
+        ),
+        seed=(
+            args.calibration_seed
+            if getattr(args, "calibration_seed", None) is not None
+            else int(pruning["calibration_seed"])
+        ),
+        sampling_semantics=sampling,
+        n_windows=int(pruning["ddf_n_windows"]),
+        n_steps=int(pruning["ddf_n_steps"]),
+        window_size=int(pruning["ddf_window_size"]),
+    )
+    strategy = getattr(args, "tabp_ranking_strategy", None) or pruning["ranking_strategy"]
+    mode = getattr(args, "tabp_mode", None) or pruning["mode"]
+    measure = getattr(args, "tabp_measure", None) or pruning["measure"]
+    lm_head_type = (
+        getattr(args, "tabp_lm_head_type", None) or pruning["lm_head_type"]
+    )
+    if lm_head_type != "frozen":
+        raise NotImplementedError(
+            "TaBP trained LM-head execution is not available without audited "
+            "per-block checkpoints; use --tabp-lm-head-type frozen"
+        )
+    if strategy == "ssn" and task_type != "qa":
+        raise ValueError("This TaBP SSN adaptation requires ARC-Easy QA calibration")
+    return calibration, strategy, mode, measure, lm_head_type
+
+
 def _load_sleb_calibration_tokenizer(
     spec: Any,
     options: LoadOptions,
@@ -314,6 +389,36 @@ def build_manifest(args: argparse.Namespace) -> dict[str, Any]:
             "candidate_tie_rule": pruning["candidate_tie_rule"],
             "greedy_iterative": pruning["greedy_iterative"],
         }
+    tabp_fields: dict[str, Any] = {}
+    if args.pruner == "tabp":
+        tabp_calibration, strategy, mode, measure, lm_head_type = _resolve_tabp_config(
+            args, pruning
+        )
+        original_blocks = spec.expected_num_hidden_layers
+        requested_remove = math.ceil(original_blocks * request.sparsity)
+        start = original_blocks // 2 if mode == "latter" else 0
+        capacity = original_blocks - 1 if strategy == "ddf" else original_blocks - start - 1
+        if requested_remove > capacity:
+            raise ValueError(
+                f"TaBP requested_remove_count={requested_remove} exceeds "
+                f"mode={mode!r} capacity={capacity}"
+            )
+        calibration = tabp_calibration.to_dict()
+        tabp_fields = {
+            "official_core_input": "num_remove_blocks",
+            "ratio_to_count_policy": "project_interface_ceil",
+            "target_sparsity_ratio": request.sparsity,
+            "expected_original_block_count": original_blocks,
+            "requested_remove_count": requested_remove,
+            "planned_achieved_block_sparsity": requested_remove / original_blocks,
+            "planned_achieved_block_retention": (original_blocks - requested_remove) / original_blocks,
+            "mode": mode,
+            "measure": measure,
+            "ssn_p": int(pruning["ssn_p"]),
+            "lm_head_type": lm_head_type,
+            "ranking_strategy": strategy,
+            "trained_lm_head_support": pruning["trained_lm_head_support"],
+        }
     sparsegpt_percdamp = pruning.get("percdamp")
     sparsegpt_blocksize = pruning.get("blocksize")
     if args.pruner == "sparsegpt":
@@ -364,6 +469,7 @@ def build_manifest(args: argparse.Namespace) -> dict[str, Any]:
             "true_sequential": pruning.get("true_sequential"),
             "calibration": calibration,
             **sleb_fields,
+            **tabp_fields,
         },
         "evaluation": evaluation,
     }
@@ -409,11 +515,91 @@ def _validate_output_directory(
     return resolved_output
 
 
+class PreparedPruningMethod(NamedTuple):
+    pruner: Any
+    context: Any
+    reduced_depth: bool = False
+
+
+def _prepare_pruning_method(
+    args: argparse.Namespace,
+    pruning_config: dict[str, Any],
+    *,
+    request: PruningRequest,
+    spec: Any,
+    options: LoadOptions,
+    loaded: Any,
+) -> PreparedPruningMethod:
+    """Build method-specific state while keeping runner load/save generic."""
+
+    if args.pruner in {"wanda", "sparsegpt"}:
+        calibration_config = _resolve_calibration_config(args, pruning_config)
+        if args.local_files_only:
+            provider = C4CalibrationProvider(lambda: load_local_c4(args.datasets_root))
+        else:
+            provider = get_calibration_provider(calibration_config.source)
+        samples = provider.prepare(loaded.tokenizer, calibration_config)
+        context = CalibrationContext(calibration_config, samples)
+        if args.pruner == "sparsegpt":
+            percdamp, blocksize = _resolve_sparsegpt_options(args, pruning_config)
+            pruner = SparseGPTPruner(percdamp=percdamp, blocksize=blocksize)
+        else:
+            pruner = get_pruner(args.pruner)
+        return PreparedPruningMethod(pruner, context)
+
+    if args.pruner == "sleb":
+        calibration, early, latter = _resolve_sleb_config(args, pruning_config)
+        pruner = SLEBPruner(
+            early_barrier=early,
+            latter_barrier=latter,
+            calibration_config=calibration,
+        )
+        context = None
+        if request.sparsity != 0:
+            calibration_tokenizer = _load_sleb_calibration_tokenizer(
+                spec, options, loaded
+            )
+            if args.local_files_only:
+                provider = WikiText2SLEBCalibrationProvider(
+                    lambda: load_local_wikitext2(args.datasets_root)
+                )
+            else:
+                provider = get_sleb_calibration_provider(calibration.source)
+            context = provider.prepare(calibration_tokenizer, calibration)
+        return PreparedPruningMethod(pruner, context, reduced_depth=True)
+
+    if args.pruner == "tabp":
+        calibration, strategy, mode, measure, lm_head_type = _resolve_tabp_config(
+            args, pruning_config
+        )
+        pruner = TaBPPruner(
+            ranking_strategy=strategy,
+            mode=mode,
+            measure=measure,
+            lm_head_type=lm_head_type,
+        )
+        context = None
+        if request.sparsity != 0:
+            dataset_path = getattr(args, "tabp_dataset_path", None)
+            if args.local_files_only and dataset_path is None:
+                raise ValueError(
+                    "Offline TaBP execution requires --tabp-dataset-path"
+                )
+            context = get_tabp_calibration_provider(calibration.source).prepare(
+                loaded.tokenizer,
+                calibration,
+                dataset_path=dataset_path,
+            )
+        return PreparedPruningMethod(pruner, context, reduced_depth=True)
+
+    return PreparedPruningMethod(get_pruner(args.pruner), None)
+
+
 def execute_experiment(args: argparse.Namespace) -> dict[str, Any]:
     """Execute a supported pruner and persist a standard HF checkpoint."""
 
     request = PruningRequest(args.model, args.pruner, args.sparsity)
-    if args.pruner not in {"magnitude", "wanda", "sparsegpt", "sleb"}:
+    if args.pruner not in PRUNER_REGISTRY:
         raise NotImplementedError(
             f"--execute is not implemented for pruner {args.pruner!r}"
         )
@@ -430,49 +616,26 @@ def execute_experiment(args: argparse.Namespace) -> dict[str, Any]:
         overwrite=args.overwrite_output_dir,
     )
     pruning_config = _load_yaml(CONFIG_ROOT / "pruning" / f"{args.pruner}.yaml")
-    if args.pruner == "sparsegpt":
-        percdamp, blocksize = _resolve_sparsegpt_options(args, pruning_config)
-        pruner = SparseGPTPruner(percdamp=percdamp, blocksize=blocksize)
-    elif args.pruner == "sleb":
-        pruner = None
-    else:
-        pruner = get_pruner(args.pruner)
     spec = load_model_spec(args.model)
     adapter = get_model_adapter(spec)
     options = _load_options(args)
     loaded = load_dense_model(spec, adapter, options)
-    if args.pruner in {"wanda", "sparsegpt"}:
-        calibration_config = _resolve_calibration_config(args, pruning_config)
-        if args.local_files_only:
-            provider = C4CalibrationProvider(lambda: load_local_c4(args.datasets_root))
-        else:
-            provider = get_calibration_provider(calibration_config.source)
-        calibration_samples = provider.prepare(loaded.tokenizer, calibration_config)
-        context = CalibrationContext(calibration_config, calibration_samples)
-        summary = pruner.prune(loaded.model, adapter, request, context)
-    elif args.pruner == "sleb":
-        sleb_config, early, latter = _resolve_sleb_config(args, pruning_config)
-        pruner = SLEBPruner(
-            early_barrier=early,
-            latter_barrier=latter,
-            calibration_config=sleb_config,
+    prepared = _prepare_pruning_method(
+        args,
+        pruning_config,
+        request=request,
+        spec=spec,
+        options=options,
+        loaded=loaded,
+    )
+    if prepared.context is not None:
+        summary = prepared.pruner.prune(
+            loaded.model, adapter, request, prepared.context
         )
-        context = None
-        if request.sparsity != 0:
-            calibration_tokenizer = _load_sleb_calibration_tokenizer(
-                spec, options, loaded
-            )
-            if args.local_files_only:
-                provider = WikiText2SLEBCalibrationProvider(
-                    lambda: load_local_wikitext2(args.datasets_root)
-                )
-            else:
-                provider = get_sleb_calibration_provider(sleb_config.source)
-            context = provider.prepare(calibration_tokenizer, sleb_config)
-        summary = pruner.prune(loaded.model, adapter, request, context)
-        loaded = replace(loaded, structure=adapter.get_structure(loaded.model))
     else:
-        summary = pruner.prune(loaded.model, adapter, request)
+        summary = prepared.pruner.prune(loaded.model, adapter, request)
+    if prepared.reduced_depth:
+        loaded = replace(loaded, structure=adapter.get_structure(loaded.model))
 
     output_dir.mkdir(parents=True, exist_ok=True)
     loaded.model.save_pretrained(output_dir)

@@ -8,7 +8,6 @@ the Qwen3/Granite compatibility adaptation used instead of legacy wrappers.
 
 from __future__ import annotations
 
-import math
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from typing import Any, Callable, Iterator
@@ -16,6 +15,7 @@ from typing import Any, Callable, Iterator
 from src.models.base import BaseModelAdapter
 
 from .base import BasePruner, PruningRequest
+from .block_removal import ratio_to_block_count
 from .sleb_calibration import SLEBCalibrationConfig, SLEBCalibrationContext
 
 
@@ -83,7 +83,7 @@ class SLEBPruningSummary:
 def ratio_to_remove_count(original_block_count: int, sparsity: float) -> int:
     """Map the project's ratio API to the official integer core input."""
 
-    return math.ceil(original_block_count * sparsity)
+    return ratio_to_block_count(original_block_count, sparsity)
 
 
 def sleb_get_loss(

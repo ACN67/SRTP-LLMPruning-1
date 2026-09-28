@@ -18,8 +18,9 @@
 - Wanda：使用 C4 activation statistics；保留官方 scoring/masking 语义，替换架构和数据 orchestration。
 - SparseGPT：使用 C4 Hessian approximation 与 sequential error compensation；保留核心算法并适配当前模型。
 - SLEB：使用 WikiText-2 loss 做 dynamic greedy block removal；物理删层后同步 config，并验证 save/reload。
+- TaBP：以 SSN/DDF 为内部 ranking strategy；canonical 路径使用 ARC-Easy 受限选项分布的一次性 p=1 SSN，并走同一 reduced-depth artifact 闭环。
 
-Magnitude/Wanda/SparseGPT 保持原模型深度并产生含零值的 dense tensor checkpoint，不自动带来稀疏推理加速；SLEB 改变 block 数量，必须走 reduced-depth loader。
+Magnitude/Wanda/SparseGPT 保持原模型深度并产生含零值的 dense tensor checkpoint，不自动带来稀疏推理加速；SLEB/TaBP 改变 block 数量，必须走 reduced-depth loader。
 
 ## 详细记录
 

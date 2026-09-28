@@ -1,0 +1,30 @@
+method: tabp
+implementation_status: implemented
+implementation_version: "2.0"
+structure: block_structured
+scope: transformer_decoder_blocks
+upstream_repo: https://github.com/Song-haJo/TaBP
+upstream_commit: f56a0d2c38f490bec7b223bb98d1bf1740e5e92a
+target_policy: pinned_executable_ranking
+rounding: ceil
+ranking_strategy: ssn
+mode: latter
+measure: entropy
+ssn_p: 1
+lm_head_type: frozen
+trained_lm_head_support: requires_explicit_compatible_upstream_checkpoints_not_enabled
+calibration_source: arc_easy
+calibration_dataset_revision: 210d026faf9955653af8916fad021475a3f00453
+calibration_task_type: qa
+calibration_samples: 1024
+calibration_seed: 0
+calibration_sampling_semantics: first_n_valid_rows
+ddf_n_windows: 32
+ddf_n_steps: 32
+ddf_window_size: 32
+excluded_components:
+  - embeddings
+  - final_norm
+  - lm_head
+retraining: false
+quantization: false

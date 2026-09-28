@@ -11,7 +11,7 @@ from .loader import LoadOptions, LoadedModel, _resolve_dtype, load_dense_model
 
 PRUNED_MANIFEST_NAME = "pruning_manifest.json"
 SAME_DEPTH_PRUNERS = {"magnitude", "wanda", "sparsegpt"}
-REDUCED_DEPTH_PRUNERS = {"sleb"}
+REDUCED_DEPTH_PRUNERS = {"sleb", "tabp"}
 
 
 def _runtime_imports() -> tuple[Any, Any, Any, Any]:
@@ -87,6 +87,8 @@ def _validate_manifest_identity(
             f"Same-depth pruner {pruner!r} recorded depth {recorded_depth}, "
             f"expected {spec.expected_num_hidden_layers}"
         )
+    if pruner not in SAME_DEPTH_PRUNERS | REDUCED_DEPTH_PRUNERS:
+        raise ValueError(f"Unsupported pruning manifest pruner: {pruner!r}")
     return pruner, recorded_depth
 
 
