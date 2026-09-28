@@ -13,11 +13,11 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
-from src.agent_evaluation import (  # noqa: E402
+from src.agent_runtime import (  # noqa: E402
     list_agent_system_ids,
     load_agent_system_spec,
 )
-from src.agent_evaluation.runners import get_agent_runner  # noqa: E402
+from src.agent_runtime.runners import get_agent_runner  # noqa: E402
 
 
 def _parser() -> argparse.ArgumentParser:

@@ -138,7 +138,7 @@ python3 scripts/setup/verify_assets.py --root /data/datasets
 剪枝示例：
 
 ```bash
-python3 scripts/run_experiment.py \
+python3 scripts/run_pruning.py \
   --model klear_agentforge_8b \
   --pruner magnitude \
   --sparsity 0.3 \
@@ -152,7 +152,7 @@ python3 scripts/run_experiment.py \
 生成与评测必须分离：
 
 ```bash
-python3 scripts/run_benchmark.py \
+python3 scripts/run_direct_benchmark.py \
   --phase generate \
   --benchmark livecodebench \
   --model klear_agentforge_8b \
@@ -163,7 +163,7 @@ python3 scripts/run_benchmark.py \
   --limit 2 \
   --offline
 
-python3 scripts/run_benchmark.py \
+python3 scripts/run_direct_benchmark.py \
   --phase evaluate \
   --benchmark livecodebench \
   --model klear_agentforge_8b \
@@ -204,10 +204,10 @@ python3 scripts/setup/preflight.py --all --json
 ## 关机前检查清单
 
 1. 确认结果写入 `/data/results`。
-2. 确认 checkpoint 写入 `/data/checkpoints`，且包含 `pruning_manifest.json`。
+2. 确认 checkpoint 写入 `/data/checkpoints`，且包含 canonical `artifact_manifest.json`。
 3. 备份关键目录到本地或对象存储：
    - `/data/results`
-   - `/data/checkpoints/*/pruning_manifest.json`
+   - `/data/checkpoints/*/artifact_manifest.json`
    - generation/evaluation manifest
    - 镜像 tar SHA256 或 AutoDL 镜像名称
 4. 记录本次实例类型、GPU 型号、显存、计费时长和异常。

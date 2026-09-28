@@ -17,11 +17,11 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
-from src.evaluation import load_benchmark_spec, task_id_hash
-from src.evaluation.base import BenchmarkTask
-from src.evaluation.lcb_protocol import LCB_V6_SHA256
-from src.calibration_assets import C4_ASSET, WIKITEXT_ASSET, calibration_asset_path
-from src.downloads import verified_download
+from src.direct_evaluation import load_benchmark_spec, task_id_hash
+from src.direct_evaluation.base import BenchmarkTask
+from src.direct_evaluation.lcb_protocol import LCB_V6_SHA256
+from src.pruning.calibration_assets import C4_ASSET, WIKITEXT_ASSET, calibration_asset_path
+from src.utils.downloads import verified_download
 
 
 DEFAULT_HF_ENDPOINT = "https://hf-mirror.net"

@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 from typing import Iterable
 
-from src.downloads import verify_file
+from src.utils.downloads import verify_file
 
 DEFAULT_SNAPSHOT_MANIFEST_DIR = (
     Path(__file__).resolve().parents[2] / "configs" / "model_snapshots"

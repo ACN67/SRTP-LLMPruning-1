@@ -13,7 +13,7 @@
 | --- | --- | --- |
 | Klear-AgentForge-8B | 已有配置、snapshot manifest、evaluation profile | Qwen3 系列的 agent/code 后训练模型，作为主要开发和剪枝验证目标 |
 | Granite-4.2-8B | 已有配置、snapshot manifest、evaluation profile | 独立 Granite 架构，用于验证结论是否跨架构成立 |
-| SWE-Lego-Qwen3-8B | 待接入 | 与 Klear 同为 Qwen3-8B 路线，适合做“同架构、不同软件工程后训练”的论文对照 |
+| SWE-Lego-Qwen3-8B | 已接入模型配置、snapshot、Direct profile 与 Agent system | 与 Klear 同为 Qwen3-8B 路线，适合做“同架构、不同软件工程后训练”的论文对照 |
 
 推荐顺序：
 
@@ -31,7 +31,7 @@
 | Wanda | 非结构化权重置零 | C4 | 已实现 | 关注 activation-aware mask；不自动加速 |
 | SparseGPT | 非结构化权重置零并更新保留权重 | C4 | 已实现 | 注意 Hessian 内存、damping、实际稀疏率和失败率 |
 | SLEB | 结构化删 Transformer block | WikiText-2 | 已实现 | 可报告真实 reduced-depth 延迟和吞吐 |
-| TaBP | 候选结构化删 block | 任务相关校准 | 待研究接入 | 先实现定义更清晰的 TaBP-SSN；DDF 排序语义澄清前不进主实验 |
+| TaBP | 结构化删 Transformer block | ARC-Easy / WikiText（按 SSN/DDF 官方分支） | 已实现 | TaBP 是一个 family；SSN 与 DDF 作为两个正式实验条件，DDF 保留 pinned executable behavior |
 
 权重稀疏方法和删 block 方法不应只按同一个 `sparsity` 数字比较。推荐报告：
 
@@ -40,6 +40,12 @@
 - checkpoint 大小；
 - TTFT、TPOT、tokens/s、峰值显存；
 - 质量与延迟的 Pareto 曲线。
+
+## Recovery
+
+Recovery 与 pruning 分层。当前仓库已经实现 PEFT LoRA 的训练、adapter save/reload、可选 merge、reduced-depth 校验和 weight-sparse merge safety，但**尚未决定最终论文协议**。后续研究需要单独确定 recovery corpus、LoRA 超参数/训练预算、哪些 pruning condition 进入 recovery，以及非结构化稀疏模型是否采用普通 adapter-only LoRA 或其他 sparsity-preserving recovery。
+
+因此正式结果至少区分 `pruned-only` 与 `pruned + recovery`，不能把恢复后的 checkpoint 直接作为剪枝算法原始结果。Recovery 数据与 pruning calibration、Direct benchmark、Agent benchmark evaluation 数据必须隔离并记录 contamination audit。
 
 ## SRTP 阶段 Benchmark
 
@@ -57,16 +63,18 @@ SRTP 阶段只承诺完成以下固定任务集：
 
 论文主基准：
 
-- **SWE-bench Verified**：主评估，输出 patch，指标为 resolved rate。
-- **SWE-bench Live**：低污染补充，必须固定 revision、时间窗、task ID hash。
+- **SWE-bench Verified**：主 repository-level 修复评估，输出 patch，指标为 resolved rate。
+- **SWE-bench Multilingual**：多语言 repository-level 软件工程能力，独立配置与 adapter 文件，但可复用公共 helper。
 - **SWT-Bench Verified**：测试生成能力，必须独立于 SWE-bench patch 修复指标报告。
 
 补充基准：
 
-- **BFCL V4 Agentic**：工具调用、web search、memory 类能力补充。只跑 Agentic 时不能报告官方 overall。
-- **Terminal-Bench 2.1 子集**：只采用预注册的 resource-bounded subset，不能人工挑“简单题”。如果要官方可比，必须完整 89 题并按官方 trial 要求运行。
+- **Terminal-Bench**：终端/系统级 autonomous task execution 补充；保持官方/native harness 语义。
+- **BFCL**：function/tool calling 与 multi-turn agentic 能力补充；保持官方/native harness 语义。
 
-SWE、SWT、BFCL、Terminal-Bench 应保留官方 harness 或官方语义 adapter。不要把它们塞进当前 `run_benchmark.py` 的简单 pass@1 evaluator。
+补充 benchmark 的具体版本与子集在实现轮再固定，不提前用当前草案冒充最终协议。
+
+SWE、SWT、BFCL、Terminal-Bench 应保留官方 harness 或官方语义 adapter。不要把它们塞进当前 `run_direct_benchmark.py` 的简单 pass@1 evaluator。
 
 ## 推荐实验矩阵
 
@@ -78,7 +86,7 @@ SWE、SWT、BFCL、Terminal-Bench 应保留官方 harness 或官方语义 adapte
 - 方法：Magnitude、Wanda、SparseGPT、SLEB。
 - 稀疏设置：权重方法 30%，SLEB 约 20% block 删除。
 - Benchmark：三个 SRTP benchmark 各 `--limit 2`。
-- 输出：完整 pruning manifest、generation/evaluation manifest、显存和耗时记录。
+- 输出：完整 canonical artifact manifest、generation/evaluation manifest、显存和耗时记录。
 
 ### SRTP 完整矩阵
 
@@ -92,8 +100,8 @@ SWE-Lego-Qwen3-8B 如果在结项前完成接入，可以补 dense baseline 和 
 ### 论文筛选矩阵
 
 - 模型：三模型。
-- 方法：Dense、最佳权重剪枝方法、SLEB、TaBP-SSN。
-- 先在预注册小集合上筛选 Pareto 点，再跑完整 SWE-bench Verified / SWE-bench Live / SWT-Bench Verified。
+- 方法：Dense、代表性权重剪枝方法、SLEB、TaBP-SSN、TaBP-DDF；Recovery 作为独立可选实验条件，不与 raw pruning 混为同一结果。
+- 先在预注册小集合上筛选 Pareto 点，再跑完整 SWE-bench Verified / SWE-bench Multilingual / SWT-Bench Verified。
 - 不建议把所有模型 × 所有剪枝方法 × 所有稀疏率直接乘到完整 agent benchmark，成本过高且难以解释。
 
 ## 统计协议
@@ -113,18 +121,16 @@ SWE 类 benchmark 建议按 repository 做 cluster bootstrap，避免同一仓�
 
 ## 代码演进路线
 
-近期只维护当前三项代码生成 benchmark：
+正式实验前的核心骨架固定为：
 
-- `scripts/run_benchmark.py`
-- `src/evaluation/benchmarks.py`
-- `src/evaluation/execution.py`
+- `src/models/`：模型身份、结构 adapter 与 dense loading；
+- `src/artifacts/`：Pruning/Recovery 与所有下游之间的 canonical artifact boundary；
+- `src/pruning/`：Magnitude、Wanda、SparseGPT、SLEB、TaBP；
+- `src/recovery/`：独立 post-pruning/post-training recovery，目前实现 PEFT LoRA；
+- `src/direct_evaluation/`：HumanEval、MBPP、LiveCodeBench；
+- `src/agent_runtime/`：vLLM lifecycle 与 model-specific canonical Agent；
+- `src/analysis/`：结果统计与效率分析。
 
-论文阶段另建分层模块：
+对应顶层入口为 `run_pruning.py`、`run_recovery.py`、`run_direct_benchmark.py`、`run_agent_system.py` 与 `analyze_results.py`。架构测试禁止 models/artifacts/pruning/recovery/direct_evaluation/agent_runtime 之间出现反向依赖。
 
-- `src/evaluation/core/`：通用 manifest、任务身份、成本、指标。
-- `src/evaluation/executors/`：OCI/Docker、SWE harness、Harbor/Terminal-Bench executor。
-- `src/evaluation/harnesses/`：SWE-bench、SWE-bench Live、SWT-Bench、BFCL、Terminal-Bench 的独立 adapter。
-- `src/evaluation/agents/`：patch agent、test agent、tool agent、terminal agent。
-- `configs/benchmarks/locks/`：固定官方 revision、task manifest、image digest、许可证说明。
-
-当前仓库不应在基础设施稳定前加入半成品论文 benchmark，以免把 SRTP 结项流程复杂化。
+下一阶段独立新增 `src/agent_benchmarks/` 与 `scripts/run_agent_benchmark.py`。SWE-bench Verified、SWE-bench Multilingual、SWT-Bench Verified 分别拥有独立 adapter Python 文件、配置、测试和 provenance 文档；相似实现只能下沉到公共 helper，不把多个正式 benchmark 合并到同一 adapter 文件。Terminal-Bench、BFCL 等后续 benchmark 允许使用 native harness，并通过同一 benchmark extension contract 接入，不修改更深层的模型、Artifact、Pruning、Recovery 或 Agent runtime。

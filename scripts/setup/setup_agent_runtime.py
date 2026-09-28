@@ -12,7 +12,7 @@ import yaml
 
 
 ROOT = Path(__file__).resolve().parents[2]
-PINS = yaml.safe_load((ROOT / "configs/runtime/agent_runtime_pins.yaml").read_text(encoding="utf-8"))
+PINS = yaml.safe_load((ROOT / "configs/agent_runtime/runtime_pins.yaml").read_text(encoding="utf-8"))
 
 
 def run(*args: str) -> None:

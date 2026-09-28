@@ -14,12 +14,12 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
-from src.evaluation.lcb_protocol import audit_v6
-from src.calibration_assets import (
+from src.direct_evaluation.lcb_protocol import audit_v6
+from src.pruning.calibration_assets import (
     C4_ASSET, WIKITEXT_ASSET, calibration_asset_path,
     load_local_c4, load_local_wikitext2,
 )
-from src.downloads import verify_file
+from src.utils.downloads import verify_file
 
 HUMANEVAL_SHA256 = "b796127e635a67f93fb35c04f4cb03cf06f38c8072ee7cee8833d7bee06979ef"
 MBPP_SHA256 = "ccf64ceae9c5403bf50a044cb6d505bfd2a2963ee58338ba268fd65beab92a9f"

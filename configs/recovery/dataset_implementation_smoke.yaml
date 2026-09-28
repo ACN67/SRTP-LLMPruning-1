@@ -1,0 +1,8 @@
+source: local_jsonl
+schema: text
+path: /path/to/local/recovery.jsonl
+split: train
+sample_limit: 32
+seed: 42
+text_field: text
+contamination_audit_status: not_run_for_implementation_smoke

@@ -1,0 +1,21 @@
+schema_version: 1
+protocol_status: implementation_baseline_not_final_experiment_protocol
+rank: 8
+lora_alpha: 16
+lora_dropout: 0.0
+target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+bias: none
+learning_rate: 0.0002
+weight_decay: 0.0
+max_steps: 1
+num_train_epochs: 0
+batch_size: 1
+gradient_accumulation_steps: 1
+max_sequence_length: 128
+seed: 42
+dtype: float32
+gradient_checkpointing: false
+save_interval: 1
+log_interval: 1
+merge_policy: adapter_only
+allow_sparse_merge: false

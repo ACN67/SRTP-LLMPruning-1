@@ -15,7 +15,7 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
-from src.evaluation import (
+from src.direct_evaluation import (
     list_benchmarks, list_profile_model_ids, load_benchmark_spec,
     load_evaluation_profile,
 )

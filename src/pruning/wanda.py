@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from src.models.base import BaseModelAdapter
-from src.models.replay import capture_native_calibration, replay_captured_block
+from src.pruning.replay import capture_native_calibration, replay_captured_block
 
 from .base import BasePruner, ModulePruningStats, PruningRequest, PruningSummary
 from .calibration import WandaPruningContext

@@ -275,7 +275,7 @@ models/*
 
 # Runtime data and generated artifacts
 data/
-artifacts/
+/artifacts/
 wandb/
 mlruns/
 *.log
