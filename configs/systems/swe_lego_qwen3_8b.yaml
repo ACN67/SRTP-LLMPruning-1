@@ -1,86 +1,92 @@
 system_id: swe_lego_qwen3_8b
 project_model_id: swe_lego_qwen3_8b
-implementation_status: planned
-
-agent:
-  framework: openhands
-  upstream_repo: https://github.com/All-Hands-AI/OpenHands
-  upstream_revision: null
-  version: "0.53.0"
-  config_path: OpenHands-0.53.0/config.toml
-  agent_class: CodeActAgent
-  max_iterations: 100
-  step_limit: null
-  cost_limit: null
-  runs: 1
-  mode: swe
-  worker_count: 24
-  use_hint_text: false
-  instruction_template_name: swe_default.j2
-  enable_plan_mode: false
-  add_in_context_learning_example: false
-  environment_cwd: null
-  command_timeout_seconds: null
-  config_model_temperature: null
-  config_drop_params: null
-  additional_tools: []
-  provenance:
-    status: official_score_recipe
-    sources:
-      - https://github.com/SWE-Lego/SWE-Lego/blob/94704b69aac886e003660e1e0f69f7de163b284e/scripts/swe_lego_qwen3_8b/infer.sh
-    notes:
-      - worker_count is infrastructure concurrency, not a model capability variable
+implementation_status: ready
 
 serving:
   backend: vllm
+  version: 0.20.2
+  executable: .venv-vllm/bin/vllm
   host: 0.0.0.0
   port: 8000
-  openai_compatible: true
-  served_model_name: Qwen/Qwen3-8B
+  served_model_name: srtp-swe-lego-qwen3-8b
   tensor_parallel_size: 8
-  gpu_memory_utilization: 0.9
+  gpu_memory_utilization: 0.90
   max_model_len: 163840
   max_num_seqs: 24
-  api_key_semantics: dummy-key
-  dtype: null
-  reasoning_parser: null
-  reasoning_parser_plugin: null
-  minimum_backend_version: null
-  tool_call_parser: null
-  enable_auto_tool_choice: null
+  dtype: bfloat16
+  api_key: dummy-key
+  extra_args: []
+  parameter_provenance:
+    topology_and_capacity: official_serving_recipe
+    dtype: project_baseline
+    stable_alias: project_baseline
+    version: project_baseline
   provenance:
     status: official_serving_recipe
     sources:
       - https://github.com/SWE-Lego/SWE-Lego/blob/94704b69aac886e003660e1e0f69f7de163b284e/scripts/swe_lego_qwen3_8b/serve_vllm.sh
     notes:
-      - official script uses the historical SWE-Lego model alias; project model identity is pinned separately
+      - The official script omits dtype and vLLM version; BF16 and v0.20.2 are fixed project baselines.
 
 generation:
   context_length: 163840
   max_input_tokens: 147456
   max_output_tokens: 16384
-  do_sample: false
-  temperature: 0.0
-  top_p: null
-  top_k: null
-  enable_thinking: null
-  truncate_history_thinking: null
+  request_parameters:
+    temperature: 0.0
+    do_sample: false
+  thinking_mode: checkpoint_default
+  history_thinking: checkpoint_default
+  parameter_provenance:
+    token_budgets_and_temperature: official_score_recipe
+    deterministic_sampling: official_score_recipe
+    thinking: checkpoint_native
   provenance:
     status: official_score_recipe
     sources:
       - https://github.com/SWE-Lego/SWE-Lego/blob/94704b69aac886e003660e1e0f69f7de163b284e/OpenHands-0.53.0/config.toml
+      - https://huggingface.co/Lego-X/SWE-Lego-Qwen3-8B/tree/00f37992485b78e9579a2674161d512781aee21e
+
+agent:
+  framework: openhands
+  version: 0.53.0
+  upstream_repo: https://github.com/All-Hands-AI/OpenHands
+  upstream_revision: 9ee704a25a331d0d2eb9a8e87a4dcff1d948855b
+  runtime_python: .venv-openhands/bin/python
+  source_checkout: .agent_runtime/OpenHands-0.53.0
+  agent_class: CodeActAgent
+  max_iterations: 100
+  runs: 1
+  mode: swe
+  worker_count: 1
+  benchmark_worker_count: 24
+  use_hint_text: false
+  instruction_template_name: swe_default.j2
+  enable_plan_mode: false
+  add_in_context_learning_example: false
+  runtime: local
+  command_timeout_seconds: 120
+  native_tool_calling: false
+  parameter_provenance:
+    score_recipe_fields: official_score_recipe
+    framework_revision: official_framework_default
+    single_task_worker: project_baseline
+    runtime_and_timeout: official_framework_default
+    native_tool_calling: project_baseline
+  provenance:
+    status: official_score_recipe
+    sources:
+      - https://github.com/SWE-Lego/SWE-Lego/blob/94704b69aac886e003660e1e0f69f7de163b284e/scripts/swe_lego_qwen3_8b/infer.sh
+      - https://github.com/All-Hands-AI/OpenHands/tree/9ee704a25a331d0d2eb9a8e87a4dcff1d948855b
+    notes:
+      - The official config does not enable native tool calling or a vLLM tool parser; false is the explicit compatible baseline.
 
 score_identity:
   benchmark_id: swebench_verified
   reported_resolved_rate: 0.422
   recipe_status: official_score_recipe
-  unknown_fields: []
+  undisclosed_fields: []
   provenance:
     status: official_score_recipe
     sources:
       - https://github.com/SWE-Lego/SWE-Lego/tree/94704b69aac886e003660e1e0f69f7de163b284e
-
-known_unknowns:
-  - agent.upstream_revision
-  - generation.enable_thinking
-  - generation.truncate_history_thinking

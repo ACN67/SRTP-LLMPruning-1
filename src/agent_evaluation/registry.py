@@ -1,4 +1,4 @@
-"""Configuration-backed registry for planned model-specific Agent systems."""
+"""Configuration-backed registry for executable model-specific Agent systems."""
 
 from __future__ import annotations
 

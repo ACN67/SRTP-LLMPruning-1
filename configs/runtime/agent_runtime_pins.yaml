@@ -1,0 +1,13 @@
+schema_version: 1
+vllm:
+  version: 0.20.2
+  repository: https://github.com/vllm-project/vllm
+  revision: bc150f50299199599673614f80d12a196f377655
+mini_swe_agent_plus:
+  version: 1.14.4
+  repository: https://github.com/Kwai-Klear/mini-swe-agent-plus
+  revision: 3dfa5e26831306978ff3cfa2da15b49113ded0e6
+openhands:
+  version: 0.53.0
+  repository: https://github.com/All-Hands-AI/OpenHands
+  revision: 9ee704a25a331d0d2eb9a8e87a4dcff1d948855b

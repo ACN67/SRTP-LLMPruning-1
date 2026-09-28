@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate one planned Agent system config without starting external software."""
+"""Validate one complete executable Agent system configuration."""
 
 from __future__ import annotations
 
@@ -17,22 +17,25 @@ from src.agent_evaluation import (  # noqa: E402
     list_agent_system_ids,
     load_agent_system_spec,
 )
+from src.agent_evaluation.runners import get_agent_runner  # noqa: E402
 
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--system", required=True, choices=list_agent_system_ids())
+    parser.add_argument("--check-runtime", action="store_true")
     return parser
 
 
 def main() -> int:
     args = _parser().parse_args()
     spec = load_agent_system_spec(args.system)
+    if args.check_runtime:
+        get_agent_runner(spec).validate_installation()
     output = {
-        "status": "config_validated",
-        "execution_available": False,
-        "server_started": False,
-        "agent_started": False,
+        "status": "executable_config_validated",
+        "canonical_config_hash": spec.canonical_config_hash,
+        "runtime_checked": args.check_runtime,
         "system": spec.to_dict(),
     }
     print(json.dumps(output, indent=2, ensure_ascii=False))

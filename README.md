@@ -4,7 +4,7 @@
 
 - **SRTP 结项阶段**：完成 Klear-AgentForge-8B、Granite-4.2-8B 上的剪枝复现，并在 HumanEval、MBPP、LiveCodeBench fine-grained v6 上做固定协议评测。
 - **论文非 Agent 阶段**：接入 SWE-Lego-Qwen3-8B、TaBP 与 dense/pruned 成对分析。
-- **后续 Agent 阶段**：单独设计 serving、SWE-bench、SWT-Bench 等软件工程 Agent 基准。
+- **Agent 运行层**：三套 canonical Agent + vLLM 系统已可独立执行本地 Git repository task；后续仅接入 SWE-bench/SWT-Bench task provisioning、evaluator 与 scheduling。
 
 本仓库目前不声明任何正式 pass@1、resolved rate 或 leaderboard 结果。真实 8B 权重、GPU 剪枝、完整 benchmark 和论文级 agent 评测仍需要服务器验证。
 
@@ -16,11 +16,43 @@
 | 剪枝 | Magnitude、Wanda、SparseGPT、SLEB、TaBP（内部支持 SSN / DDF） | 无 |
 | 分析 | task-level paired bootstrap、retention/delta、Pareto helper | repo-cluster bootstrap、serving TTFT/TPOT |
 | SRTP benchmark | HumanEval original 164、MBPP original test 500、LiveCodeBench fine-grained v6 175 | 无 |
+| Agent runtime | vLLM 生命周期、mini-swe-agent-plus、OpenHands、dense/pruned artifact、patch/trajectory/manifest | 真实 8B GPU 环境 smoke |
 | 论文 benchmark | 无 | SWE-bench Verified/Live、SWT-Bench Verified、BFCL V4 Agentic、Terminal-Bench 2.1 子集 |
 
 TaBP 在 registry 中仍是一个 pruning family；后续 empirical study 会将 TaBP-SSN 与 TaBP-DDF 作为两个实验条件，而不是两个顶层算法 family。
 
-当前代码已经覆盖配置注册、模型 snapshot manifest、下载校验、tiny model 剪枝回归、artifact manifest、三项代码生成 benchmark 的 generate/evaluate 分离流程。完整 8B 服务器实验尚待执行。
+当前代码已经覆盖配置注册、模型 snapshot manifest、下载校验、tiny model 剪枝回归、artifact manifest、三项代码生成 benchmark 的 generate/evaluate 分离流程，以及完整 Agent + vLLM 运行链。完整 8B 服务器实验仍待执行。
+
+## Agent + vLLM
+
+三套系统都由 `configs/systems/` 中的完整配置启动。重依赖分别安装到隔离环境，不改变现有 `.venv`：
+
+```bash
+.venv/bin/python scripts/setup/setup_agent_runtime.py --component vllm
+.venv/bin/python scripts/setup/setup_agent_runtime.py --component mini_swe_agent_plus
+.venv/bin/python scripts/setup/setup_agent_runtime.py --component openhands
+```
+
+可通过 `--index-url https://pypi.tuna.tsinghua.edu.cn/simple` 显式选择国内 PyPI 镜像。启动前检查：
+
+```bash
+.venv/bin/python scripts/setup/agent_preflight.py \
+  --system klear_agentforge_8b \
+  --artifact-path /data/models/klear_agentforge_8b
+```
+
+运行本地任务（系统可替换为 `swe_lego_qwen3_8b` 或 `granite_4_2_8b`）：
+
+```bash
+.venv/bin/python scripts/run_agent_system.py \
+  --system klear_agentforge_8b \
+  --artifact-path /data/checkpoints/klear_agentforge_8b/magnitude_s030 \
+  --repo-path /path/to/local/repo \
+  --task-file task.md \
+  --output-dir /data/results/agent_smoke/task001
+```
+
+默认自动管理 vLLM；`--endpoint http://host:8000` 复用已有服务。`--port`、`--tensor-parallel-size`、`--gpu-memory-utilization` 和 `--max-num-seqs` 是显式基础设施 override，并会写入 manifest。`--dry-run` 验证 artifact、任务和完整命令但不启动进程；`--keep-server` 仅在成功后保留本轮启动的服务。输出包含 `run_manifest.json`、`serving_manifest.json`、trajectory、Agent/vLLM 日志和 `changes.patch`。
 
 更多规划见：
 
