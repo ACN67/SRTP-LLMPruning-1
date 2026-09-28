@@ -1,117 +1,196 @@
 # SRTP LLM 剪枝复现与评测
 
-## 当前状态
+本仓库用于复现和评测 8B 代码/软件工程模型剪枝。当前目标分为两层：
 
-本仓库面向 2 个 8B 模型、4 种剪枝方法和 3 个代码能力 benchmark：
+- **SRTP 结项阶段**：完成 Klear-AgentForge-8B、Granite-4.2-8B 上的剪枝复现，并在 HumanEval、MBPP、LiveCodeBench fine-grained v6 上做固定协议评测。
+- **论文阶段**：补充 SWE-Lego-Qwen3-8B、TaBP 候选方法，以及 SWE-bench / SWT-Bench / BFCL / Terminal-Bench 等软件工程 agent 基准。
 
-| 类别 | 支持对象 |
-|---|---|
-| 模型 | Klear-AgentForge-8B、Granite-4.2-8B |
-| 剪枝 | Magnitude、Wanda、SparseGPT、SLEB |
-| 评测 | HumanEval original（164）、MBPP original（500）、LiveCodeBench v6（175） |
+本仓库目前不声明任何正式 pass@1、resolved rate 或 leaderboard 结果。真实 8B 权重、GPU 剪枝、完整 benchmark 和论文级 agent 评测仍需要服务器验证。
 
-本地已经验证配置、下载/校验逻辑、tiny model、剪枝算法回归和 evaluator。真实 8B 权重、Docker image、GPU、正式 pruning 与 full benchmark 仍待服务器验证，仓库不声明任何正式 pass@1 结果。
+## 当前支持范围
+
+| 类别 | 已实现 | 规划中 |
+| --- | --- | --- |
+| 模型 | Klear-AgentForge-8B、Granite-4.2-8B | SWE-Lego-Qwen3-8B |
+| 剪枝 | Magnitude、Wanda、SparseGPT、SLEB | TaBP-SSN，DDF 待澄清 |
+| SRTP benchmark | HumanEval original 164、MBPP original test 500、LiveCodeBench fine-grained v6 175 | 无 |
+| 论文 benchmark | 无 | SWE-bench Verified/Live、SWT-Bench Verified、BFCL V4 Agentic、Terminal-Bench 2.1 子集 |
+
+当前代码已经覆盖配置注册、模型 snapshot manifest、下载校验、tiny model 剪枝回归、artifact manifest、三项代码生成 benchmark 的 generate/evaluate 分离流程。完整 8B 服务器实验尚待执行。
+
+更多规划见：
+
+- `docs/RESEARCH_PLAN.md`
+- `docs/DEPLOYMENT.md`
 
 ## 主流程
 
 ```text
 准备模型与数据
-→ build/load Docker image
+→ 构建或准备运行环境
 → software/GPU/path preflight
 → pruning 并保存 checkpoint
 → benchmark generate
 → 在隔离环境 benchmark evaluate
+→ 归档 manifest、结果和环境身份
 ```
 
-## 支持对象与配置
+## 目录与配置
 
 - 模型身份与结构：`configs/models/`
-- canonical runtime 文件清单：`configs/model_snapshots/`
+- runtime snapshot 清单：`configs/model_snapshots/`
 - 剪枝参数：`configs/pruning/`
 - benchmark 数据、prompt、extraction：`configs/eval/`
 - model × benchmark generation 参数：`configs/evaluation_profiles/`
-- 上游 revision、license 与适配说明：`third_party/`
+- 上游 revision、license 与方法说明：`third_party/`
 
-`max_new_tokens`、sampling、chat template 和 trial 数只由 evaluation profile 管理。相同模型的 dense 与各类 pruned artifact 必须使用同一 profile。
+持久化目录约定为：
 
-## 本地准备
-
-国内默认模型 transport 是 ModelScope，科学身份仍是 canonical Hugging Face repo + exact commit。下载器按仓库内 runtime snapshot manifest 逐文件做 size/hash 校验，使用 `.part` 和 atomic rename；国内失败不会自动切换官方 HF。
-`download_models.py` 只负责下载、校验并写入 transport provenance；已有 snapshot 的只读验证统一使用 `verify_model_snapshot.py`，不会改写 provenance sidecar。
-
-```bash
-python scripts/setup/download_models.py --all --root /data/models
-python scripts/setup/download_models.py --model granite_4_2_8b \
-  --download-source official --root /data/models
-python scripts/setup/verify_model_snapshot.py --model klear_agentforge_8b \
-  --path /data/models/klear_agentforge_8b
+```text
+/data/models
+/data/cache
+/data/datasets
+/data/checkpoints
+/data/results
 ```
 
-只验证国内小文件链路、避免下载权重 shard：
+模型权重、benchmark 数据、checkpoint、结果和 secrets 不进入 Git。
+
+## 本地与服务器准备
+
+建议使用 Linux/WSL2 或服务器 Linux 环境。普通 Windows 本地不适合作为正式剪枝和 benchmark 运行环境。
+
+安装依赖：
 
 ```bash
-python scripts/setup/download_models.py --all --small-file-smoke --root /tmp/model-smoke
+python3 -m pip install \
+  --index-url https://pypi.tuna.tsinghua.edu.cn/simple \
+  -r requirements.txt
 ```
 
-benchmark 资产以及 C4/WikiText-2 calibration 文件默认从 `https://hf-mirror.net` 的 exact resolve URL 直接下载。C4 使用固定 gzip JSONL shard；WikiText-2 使用固定 parquet。两者均做 size/SHA256 校验，不依赖 Hub metadata 或 remote dataset script。
+基础检查：
 
 ```bash
-python scripts/setup/prefetch_assets.py --all --root /data/datasets
-python scripts/setup/verify_assets.py --root /data/datasets
+python3 -c "import src.models; print('import-ok')"
+python3 scripts/setup/preflight.py --software-only
+python3 scripts/setup/preflight.py --paths
+python3 scripts/setup/preflight.py --gpu
 ```
 
-## Docker / Server
-
-持久化目录约定为 `/data/{models,cache,datasets,checkpoints,results}`。canonical image 通过国内 DaoCloud mirror 获取固定 digest 的 PyTorch 2.7.1 / CUDA 12.8 runtime，pip 默认使用清华镜像，面向 Linux amd64 与 NVIDIA GPU。
+如果使用支持 Docker 的服务器：
 
 ```bash
 scripts/setup/build_image.sh srtp-llm-pruning:server-ready
 scripts/setup/smoke_image.sh srtp-llm-pruning:server-ready software
 scripts/setup/smoke_image.sh srtp-llm-pruning:server-ready gpu
-python scripts/setup/preflight.py --all --json
 ```
 
-本地 graduation gate 已实际完成 image build、software smoke 与 RTX 5060 Docker GPU smoke。Docker build 不会下载模型或数据。
+AutoDL 普通容器实例不支持嵌套 Docker，推荐用平台自定义镜像保存系统盘环境，并把模型、数据和结果放在 `/root/autodl-tmp/srtp`，再通过 `/data/...` 软链接兼容项目路径。详细步骤见 `docs/DEPLOYMENT.md`。
+
+## 模型和数据
+
+国内默认模型 transport 是 ModelScope，科学身份仍然是 canonical Hugging Face repo + exact commit。下载器会按仓库内 snapshot manifest 逐文件校验 size/hash，使用 `.part` 和 atomic rename；国内失败不会自动切换官方 HF。
+
+```bash
+python3 scripts/setup/download_models.py --all --root /data/models
+python3 scripts/setup/download_models.py --model granite_4_2_8b \
+  --download-source official --root /data/models
+
+python3 scripts/setup/verify_model_snapshot.py \
+  --model klear_agentforge_8b \
+  --path /data/models/klear_agentforge_8b
+```
+
+只验证小文件链路，避免下载权重 shard：
+
+```bash
+python3 scripts/setup/download_models.py \
+  --all --small-file-smoke --root /tmp/model-smoke
+```
+
+benchmark 资产以及 C4/WikiText-2 calibration 文件默认从固定 exact resolve URL 下载并校验：
+
+```bash
+python3 scripts/setup/prefetch_assets.py --all --root /data/datasets
+python3 scripts/setup/verify_assets.py --root /data/datasets
+```
 
 ## 剪枝
 
-```bash
-python scripts/run_experiment.py --model klear_agentforge_8b --pruner magnitude \
-  --sparsity 0.2 --execute --local-path /data/models/klear_agentforge_8b \
-  --output-dir /data/checkpoints/klear_agentforge_8b/magnitude_s020
-```
-
-`--local-files-only --datasets-root /data/datasets` 会从已验证的本地 C4 JSON gzip 或 WikiText parquet 建立 dataset，再交给原 calibration provider。C4 seeded contiguous sampling 和 SLEB shuffle/first rows/join/tokenize 语义不变。
-
-## 代码能力评测
-
-generation 与 evaluator 是强制分离的两个 phase，没有组合执行入口。`--limit N` 仅用于 smoke；正式运行使用完整 pinned task set。`--num-trials N` 生成 repeated pass@1，报告每个 trial、mean 和 std，不称为 pass@N。
+示例：
 
 ```bash
-python scripts/run_benchmark.py --phase generate --benchmark livecodebench \
-  --model klear_agentforge_8b --artifact-kind dense --artifact-label dense \
-  --artifact-path /data/models/klear_agentforge_8b --run-id smoke --limit 2 --offline
-
-python scripts/run_benchmark.py --phase evaluate --benchmark livecodebench \
-  --model klear_agentforge_8b --artifact-kind dense --artifact-label dense \
-  --run-id smoke --limit 2 --offline
+python3 scripts/run_experiment.py \
+  --model klear_agentforge_8b \
+  --pruner magnitude \
+  --sparsity 0.3 \
+  --execute \
+  --local-path /data/models/klear_agentforge_8b \
+  --local-files-only \
+  --datasets-root /data/datasets \
+  --output-dir /data/checkpoints/klear_agentforge_8b/magnitude_s030
 ```
 
-## 结果与可复现性
+`--local-files-only --datasets-root /data/datasets` 会从已验证的本地 C4 JSON gzip 或 WikiText parquet 建立 calibration dataset。Magnitude、Wanda、SparseGPT 保存的是普通 dense tensor 中的零值；没有稀疏 kernel 时不应宣称推理加速。SLEB 会物理删 block，需要 reduced-depth artifact loader 校验。
 
-结果写入 `/data/results/<benchmark>/<model>/<artifact>/<run-id>/`。manifest 保存 task identity、prompt/extraction protocol、实际 effective generation config、evaluator timeout、trial/seed、模型/剪枝 provenance、source generation config hash、source Git revision/dirty 状态、软件环境、运行时可获得的 image metadata 与结果 hash。完整 Docker image identity 由 `export_image.sh` 生成的 tar SHA256 和 metadata JSON 保存。模型权重、数据、checkpoint、结果和 secrets 不进入 Git。
+## 代码生成评测
 
-依赖分为两类：PyTorch/CUDA、Transformers 与固定 source revisions 是方法/兼容性关键项；Accelerate、datasets 5.0.1、PyYAML、huggingface_hub、NumPy 和 tqdm 是经过 clean resolution 的 reproducible runtime lock。LCB 不依赖 `datasets`。
+generation 与 evaluator 是两个独立 phase，没有组合执行入口。`--limit N` 只用于 smoke；正式运行必须使用完整 pinned task set。
+
+```bash
+python3 scripts/run_benchmark.py \
+  --phase generate \
+  --benchmark livecodebench \
+  --model klear_agentforge_8b \
+  --artifact-kind dense \
+  --artifact-label dense \
+  --artifact-path /data/models/klear_agentforge_8b \
+  --run-id smoke \
+  --limit 2 \
+  --offline
+
+python3 scripts/run_benchmark.py \
+  --phase evaluate \
+  --benchmark livecodebench \
+  --model klear_agentforge_8b \
+  --artifact-kind dense \
+  --artifact-label dense \
+  --run-id smoke \
+  --limit 2 \
+  --offline
+```
+
+结果写入：
+
+```text
+/data/results/<benchmark>/<model>/<artifact-label>/<run-id>/
+```
+
+manifest 会保存 task identity、prompt/extraction protocol、effective generation config、trial/seed、模型/剪枝 provenance、Git revision/dirty 状态、软件环境和结果 hash。
+
+## 论文阶段边界
+
+SWE-bench、SWT-Bench、BFCL、Terminal-Bench 不应直接扩进当前 `run_benchmark.py`。它们需要独立 harness、容器隔离、任务 revision lock、成本记录和更复杂的指标。
+
+论文阶段的建议顺序：
+
+1. 补 SWE-Lego-Qwen3-8B 的 model config、snapshot manifest、evaluation profile。
+2. 跑三模型 dense baseline。
+3. 复现并澄清 TaBP，上游 DDF 排序语义未确认前只实现 TaBP-SSN 候选。
+4. 用小规模预注册集合筛选 Pareto 点。
+5. 只把少量 Pareto artifact 投入完整 SWE/SWT agent benchmark。
 
 ## 安全说明
 
-模型生成的 Python 是不可信代码。reliability guard 不是安全沙箱。建议 GPU container 只负责 generation；CPU evaluator 使用 disposable container，并配置 `--network none`、`--cap-drop ALL`、`no-new-privileges` 及 CPU/memory/PID/wall-time limits。
+模型生成的 Python 是不可信代码。当前 reliability guard 不是安全沙箱。
+
+建议 GPU 环境只负责模型 generation；CPU evaluator 使用 disposable container，并配置 `--network none`、`--cap-drop ALL`、`no-new-privileges` 及 CPU/memory/PID/wall-time limits。AutoDL 普通容器实例不适合无隔离执行模型生成代码。
 
 ## 尚待服务器验证
 
-1. 完整下载并验证两个 8B snapshot。
-2. 实际 build/export/load Docker image。
-3. 运行 CUDA/GPU preflight 与 dense load/forward/generate smoke。
-4. prefetch 并验证真实 benchmark/calibration assets。
-5. 验证四类 pruned artifact，尤其 SLEB reduced checkpoint。
-6. 先运行 `--limit 2`，再根据资源执行 full benchmark。
+1. 完整下载并验证两个已接入 8B snapshot。
+2. 运行 CUDA/GPU preflight 与 dense load/forward/generate smoke。
+3. Prefetch 并验证真实 benchmark/calibration assets。
+4. 验证四类 pruned artifact，尤其 SLEB reduced checkpoint。
+5. 先运行 `--limit 2`，再根据资源执行 full benchmark。
+6. 补 SWE-Lego-Qwen3-8B、TaBP 和论文级 agent benchmark。

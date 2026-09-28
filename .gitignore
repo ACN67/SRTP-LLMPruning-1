@@ -211,6 +211,8 @@ tempCodeRunnerFile.py
 
 # Large reproducibility artifacts
 models/
+!src/models/
+!src/models/*.py
 datasets/
 checkpoints/
 results/
