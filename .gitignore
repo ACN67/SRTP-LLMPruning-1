@@ -211,6 +211,8 @@ tempCodeRunnerFile.py
 
 # Large reproducibility artifacts
 models/
+!configs/models/
+!configs/models/*.yaml
 !src/models/
 !src/models/*.py
 datasets/

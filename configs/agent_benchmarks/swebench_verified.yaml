@@ -1,0 +1,14 @@
+benchmark_id: swebench_verified
+implementation_status: planned
+dataset: princeton-nlp/SWE-bench_Verified
+split: test
+expected_task_count: 500
+metric: resolved_rate
+harness:
+  repository: https://github.com/SWE-bench/SWE-bench
+  release: v4.0.4
+  revision: c7c22a916c9215e709722bc5ab18df4062dc6248
+provenance:
+  status: official_benchmark_release
+  sources:
+    - https://github.com/SWE-bench/SWE-bench/releases/tag/v4.0.4

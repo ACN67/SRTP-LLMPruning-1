@@ -33,8 +33,14 @@ def runtime_file_url(
 ) -> str:
     quoted = urllib.parse.quote(relative_path, safe="/")
     if download_source == "domestic":
+        domestic_repo = manifest.get("domestic_modelscope_repo")
+        if not domestic_repo:
+            raise ValueError(
+                f"Model {manifest['project_model_id']!r} has no verified ModelScope "
+                "mirror; use --download-source official."
+            )
         base = (endpoint or MODELSCOPE_ENDPOINT).rstrip("/")
-        return f"{base}/{manifest['domestic_modelscope_repo']}/resolve/master/{quoted}"
+        return f"{base}/{domestic_repo}/resolve/master/{quoted}"
     if download_source == "official":
         base = (endpoint or OFFICIAL_HF_ENDPOINT).rstrip("/")
         return (

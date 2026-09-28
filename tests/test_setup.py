@@ -101,6 +101,21 @@ class ModelTransportTests(unittest.TestCase):
         self.assertEqual(domestic, "https://modelscope.cn/models/Kwai-Klear/Klear-AgentForge-8B/resolve/master/config.json")
         self.assertIn("/resolve/fa3d41e92e9ce7a5b4a52a3e7439aa00521f40c9/config.json", official)
 
+    def test_swe_lego_requires_official_transport_without_fake_mirror(self):
+        manifest = load_snapshot_manifest("swe_lego_qwen3_8b")
+        self.assertIsNone(manifest["domestic_modelscope_repo"])
+        with self.assertRaisesRegex(ValueError, "no verified ModelScope"):
+            self.module.runtime_file_url(
+                manifest, "config.json", download_source="domestic"
+            )
+        official = self.module.runtime_file_url(
+            manifest, "config.json", download_source="official"
+        )
+        self.assertIn(
+            "/resolve/00f37992485b78e9579a2674161d512781aee21e/config.json",
+            official,
+        )
+
     def test_downloader_has_no_verify_only_interface(self):
         destinations = {action.dest for action in self.module._parser()._actions}
         self.assertNotIn("local_files_only", destinations)
@@ -142,7 +157,9 @@ class ModelTransportTests(unittest.TestCase):
             self.assertFalse(Path(directory, "klear_agentforge_8b", ".srtp_model_source.json").exists())
 
     def test_repository_manifests_match_model_registry_and_include_index_shards(self):
-        for model_id in ("klear_agentforge_8b", "granite_4_2_8b"):
+        for model_id in (
+            "klear_agentforge_8b", "granite_4_2_8b", "swe_lego_qwen3_8b"
+        ):
             manifest = load_snapshot_manifest(model_id)
             paths = {item["path"] for item in manifest["required_runtime_files"]}
             self.assertIn("config.json", paths)

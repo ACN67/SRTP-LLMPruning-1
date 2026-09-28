@@ -1,0 +1,103 @@
+system_id: klear_agentforge_8b
+project_model_id: klear_agentforge_8b
+implementation_status: planned
+
+agent:
+  framework: mini_swe_agent_plus
+  upstream_repo: https://github.com/Kwai-Klear/mini-swe-agent-plus
+  upstream_revision: 3dfa5e26831306978ff3cfa2da15b49113ded0e6
+  version: null
+  config_path: src/minisweagent/config/extra/swebench_add_edit_tool.yaml
+  agent_class: null
+  max_iterations: null
+  step_limit: 200
+  cost_limit: 3.0
+  runs: null
+  mode: null
+  worker_count: null
+  use_hint_text: null
+  instruction_template_name: null
+  enable_plan_mode: null
+  add_in_context_learning_example: null
+  environment_cwd: /testbed
+  command_timeout_seconds: 60
+  config_model_temperature: 1.0
+  config_drop_params: true
+  additional_tools:
+    - edit_via_str_replace
+  provenance:
+    status: official_agent_config
+    sources:
+      - https://github.com/Kwai-Klear/mini-swe-agent-plus/blob/3dfa5e26831306978ff3cfa2da15b49113ded0e6/src/minisweagent/config/extra/swebench_add_edit_tool.yaml
+    notes:
+      - these are current upstream config values, not proven 39.4 score-specific overrides
+
+serving:
+  backend: vllm
+  host: null
+  port: null
+  openai_compatible: true
+  served_model_name: null
+  tensor_parallel_size: null
+  gpu_memory_utilization: null
+  max_model_len: null
+  max_num_seqs: null
+  api_key_semantics: null
+  dtype: null
+  reasoning_parser: null
+  reasoning_parser_plugin: null
+  minimum_backend_version: null
+  tool_call_parser: null
+  enable_auto_tool_choice: null
+  provenance:
+    status: official_supported_backend
+    sources:
+      - https://github.com/Kwai-Klear/mini-swe-agent-plus/blob/3dfa5e26831306978ff3cfa2da15b49113ded0e6/README.md
+    notes:
+      - upstream documents hosted_vllm and multiple vLLM servers but no exact 39.4 serving recipe
+
+generation:
+  context_length: 65536
+  max_input_tokens: null
+  max_output_tokens: null
+  do_sample: true
+  temperature: 0.6
+  top_p: 0.95
+  top_k: 20
+  enable_thinking: null
+  truncate_history_thinking: null
+  provenance:
+    status: checkpoint_native
+    sources:
+      - https://huggingface.co/Kwai-Klear/Klear-AgentForge-8B/tree/fa3d41e92e9ce7a5b4a52a3e7439aa00521f40c9
+    notes:
+      - checkpoint-native generation values are not proof of score-time overrides
+
+score_identity:
+  benchmark_id: swebench_verified
+  reported_resolved_rate: 0.394
+  recipe_status: score_recipe_undisclosed
+  unknown_fields:
+    - exact agent config overrides
+    - exact serving parameters
+    - exact sampling overrides
+    - exact run count and seed policy
+  provenance:
+    status: score_recipe_undisclosed
+    sources:
+      - https://github.com/Kwai-Klear/Klear-AgentForge/tree/d37d53ee65dae326b2ec3f61d58a3e0a7e19db21
+    notes:
+      - official report identifies mini-swe-agent-plus but does not publish the complete 39.4 run recipe
+
+known_unknowns:
+  - agent.version
+  - agent.agent_class
+  - agent.max_iterations
+  - agent.runs
+  - serving.host
+  - serving.port
+  - serving.tensor_parallel_size
+  - serving.max_model_len
+  - generation.max_input_tokens
+  - generation.max_output_tokens
+  - generation.enable_thinking

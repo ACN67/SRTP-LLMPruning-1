@@ -132,7 +132,9 @@ class LCBProtocolTests(unittest.TestCase):
 
 class ProfileTests(unittest.TestCase):
     def test_humaneval_and_mbpp_are_greedy_single_trial(self):
-        for model in ("klear_agentforge_8b", "granite_4_2_8b"):
+        for model in (
+            "klear_agentforge_8b", "granite_4_2_8b", "swe_lego_qwen3_8b"
+        ):
             for benchmark in ("humaneval", "mbpp"):
                 profile = load_evaluation_profile(model, benchmark)
                 self.assertFalse(profile.do_sample)
@@ -150,6 +152,18 @@ class ProfileTests(unittest.TestCase):
         self.assertEqual((profile.temperature, profile.top_p, profile.top_k, profile.max_new_tokens),
                          (1.0, 0.95, 50, 8192))
         self.assertEqual(profile.chat_template_kwargs, {"enable_thinking": True})
+
+    def test_swe_lego_direct_profiles_use_nothink_and_pinned_sampling(self):
+        for benchmark in ("humaneval", "mbpp"):
+            profile = load_evaluation_profile("swe_lego_qwen3_8b", benchmark)
+            self.assertFalse(profile.do_sample)
+            self.assertEqual(profile.chat_template_kwargs, {"enable_thinking": False})
+        profile = load_evaluation_profile("swe_lego_qwen3_8b", "livecodebench")
+        self.assertEqual(
+            (profile.temperature, profile.top_p, profile.top_k, profile.max_new_tokens),
+            (0.6, 0.95, 20, 4096),
+        )
+        self.assertEqual(profile.chat_template_kwargs, {"enable_thinking": False})
 
 
 class TinyTokenizer:

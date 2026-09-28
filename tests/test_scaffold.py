@@ -16,7 +16,7 @@ class ModelRegistryTests(unittest.TestCase):
     def test_expected_model_ids_are_stable(self) -> None:
         self.assertEqual(
             set(list_model_ids()),
-            {"klear_agentforge_8b", "granite_4_2_8b"},
+            {"klear_agentforge_8b", "granite_4_2_8b", "swe_lego_qwen3_8b"},
         )
 
     def test_full_upstream_ids_and_architectures(self) -> None:
@@ -30,6 +30,11 @@ class ModelRegistryTests(unittest.TestCase):
                 "ibm-granite/granite-4.2-8b",
                 "Granite",
                 "granite",
+            ),
+            "swe_lego_qwen3_8b": (
+                "Lego-X/SWE-Lego-Qwen3-8B",
+                "Qwen3",
+                "qwen3",
             ),
         }
         for project_model_id, values in expected.items():

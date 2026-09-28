@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "project_model_id": "swe_lego_qwen3_8b",
+  "canonical_hf_repo": "Lego-X/SWE-Lego-Qwen3-8B",
+  "canonical_hf_revision": "00f37992485b78e9579a2674161d512781aee21e",
+  "domestic_modelscope_repo": null,
+  "required_runtime_files": [
+    {"path": "config.json", "size": 1639, "hash_type": "git_blob_sha1", "expected_hash": "319d75d663fb6bc955f5d01125e7c565d5195a86"},
+    {"path": "generation_config.json", "size": 214, "hash_type": "git_blob_sha1", "expected_hash": "4b230772bee9403332ba1bfcabcbbbd5b53f12ec"},
+    {"path": "added_tokens.json", "size": 707, "hash_type": "git_blob_sha1", "expected_hash": "b54f9135e44c1e81047e8d05cb027af8bc039eed"},
+    {"path": "chat_template.jinja", "size": 4168, "hash_type": "git_blob_sha1", "expected_hash": "01be9b307daa2d425f7c168c9fb145a286e0afb4"},
+    {"path": "merges.txt", "size": 1671853, "hash_type": "git_blob_sha1", "expected_hash": "31349551d90c7606f325fe0f11bbb8bd5fa0d7c7"},
+    {"path": "special_tokens_map.json", "size": 613, "hash_type": "git_blob_sha1", "expected_hash": "ac23c0aaa2434523c494330aeb79c58395378103"},
+    {"path": "tokenizer.json", "size": 11422654, "hash_type": "sha256", "expected_hash": "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4"},
+    {"path": "tokenizer_config.json", "size": 5431, "hash_type": "git_blob_sha1", "expected_hash": "0209709b873860c21430751c74dc85a30a4fb242"},
+    {"path": "vocab.json", "size": 2776833, "hash_type": "git_blob_sha1", "expected_hash": "4783fe10ac3adce15ac8f358ef5462739852c569"},
+    {"path": "model.safetensors.index.json", "size": 32910, "hash_type": "git_blob_sha1", "expected_hash": "ba886c0c1e1c20374a7e5620ad84ba1d9e0bb245"},
+    {"path": "model-00001-of-00004.safetensors", "size": 4902257696, "hash_type": "sha256", "expected_hash": "92a614466d1311385f4a08b783cc65d4c4f57d14665de42dda3c1876cf5dbefe"},
+    {"path": "model-00002-of-00004.safetensors", "size": 4915960368, "hash_type": "sha256", "expected_hash": "d7ae696ce7397fbce79bc4839bae81f9cdd2e0ffdc88216b3ab1a03a0c965527"},
+    {"path": "model-00003-of-00004.safetensors", "size": 4983068496, "hash_type": "sha256", "expected_hash": "5e37858dcea0ba2f09c1ceb31653954b931bb26aae19a36dfd42ec20b7fd73ba"},
+    {"path": "model-00004-of-00004.safetensors", "size": 1580230264, "hash_type": "sha256", "expected_hash": "3e72363dc515d1a9bce79730bf36eb1434676079550b08b024e80d0b2c90e06c"}
+  ]
+}

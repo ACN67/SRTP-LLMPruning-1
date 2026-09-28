@@ -71,6 +71,11 @@ class ModelConfigTests(unittest.TestCase):
                 40,
                 12800,
             ),
+            "swe_lego_qwen3_8b": (
+                "00f37992485b78e9579a2674161d512781aee21e",
+                36,
+                12288,
+            ),
         }
         for model_id, values in expected.items():
             with self.subTest(model_id=model_id):
@@ -90,7 +95,9 @@ class ModelConfigTests(unittest.TestCase):
 
 class AdapterTraversalTests(unittest.TestCase):
     def test_both_adapters_expose_native_structure(self) -> None:
-        for model_id in ("klear_agentforge_8b", "granite_4_2_8b"):
+        for model_id in (
+            "klear_agentforge_8b", "granite_4_2_8b", "swe_lego_qwen3_8b"
+        ):
             with self.subTest(model_id=model_id):
                 spec = load_model_spec(model_id)
                 adapter = get_model_adapter(spec)

@@ -8,6 +8,7 @@
 |---|---|---|
 | `klear_agentforge_8b` | Qwen3ForCausalLM | 36 blocks，hidden 4096，MLP 12288，32 attention / 8 KV heads |
 | `granite_4_2_8b` | GraniteForCausalLM | 40 blocks，hidden 4096，MLP 12800，32 attention / 8 KV heads |
+| `swe_lego_qwen3_8b` | Qwen3ForCausalLM | 36 blocks，hidden 4096，MLP 12288，32 attention / 8 KV heads；复用 Qwen3 adapter |
 
 两个模型都通过 `model.model.layers` 暴露 decoder blocks，并在 model-level forward 计算 rotary position embeddings。旧 LLaMA orchestration 不能直接替代当前 native forward；本项目通过 adapter 与 native capture/replay 处理。
 

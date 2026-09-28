@@ -89,11 +89,13 @@ AutoDL 普通容器实例不支持嵌套 Docker，推荐用平台自定义镜像
 
 ## 模型和数据
 
-国内默认模型 transport 是 ModelScope，科学身份仍然是 canonical Hugging Face repo + exact commit。下载器会按仓库内 snapshot manifest 逐文件校验 size/hash，使用 `.part` 和 atomic rename；国内失败不会自动切换官方 HF。
+国内默认模型 transport 是 ModelScope，科学身份仍然是 canonical Hugging Face repo + exact commit。下载器会按仓库内 snapshot manifest 逐文件校验 size/hash，使用 `.part` 和 atomic rename；国内失败不会自动切换官方 HF。SWE-Lego 没有经过核实的 ModelScope 镜像，必须显式选择官方源。
 
 ```bash
 python3 scripts/setup/download_models.py --all --root /data/models
 python3 scripts/setup/download_models.py --model granite_4_2_8b \
+  --download-source official --root /data/models
+python3 scripts/setup/download_models.py --model swe_lego_qwen3_8b \
   --download-source official --root /data/models
 
 python3 scripts/setup/verify_model_snapshot.py \
@@ -104,8 +106,10 @@ python3 scripts/setup/verify_model_snapshot.py \
 只验证小文件链路，避免下载权重 shard：
 
 ```bash
-python3 scripts/setup/download_models.py \
-  --all --small-file-smoke --root /tmp/model-smoke
+python3 scripts/setup/download_models.py --model klear_agentforge_8b \
+  --small-file-smoke --root /tmp/model-smoke
+python3 scripts/setup/download_models.py --model swe_lego_qwen3_8b \
+  --download-source official --small-file-smoke --root /tmp/model-smoke
 ```
 
 benchmark 资产以及 C4/WikiText-2 calibration 文件默认从固定 exact resolve URL 下载并校验：
@@ -167,6 +171,17 @@ python3 scripts/run_benchmark.py \
 ```
 
 manifest 会保存 task identity、prompt/extraction protocol、effective generation config、trial/seed、模型/剪枝 provenance、Git revision/dirty 状态、软件环境和结果 hash。
+
+## Direct 与 Agent evaluation
+
+两条评测路径保持独立：
+
+```text
+Direct: artifact -> Transformers -> HumanEval / MBPP / LiveCodeBench
+Agent:  artifact -> vLLM -> model-specific canonical Agent -> repository sandbox -> SWE / SWT
+```
+
+`configs/systems/` 与 `src/agent_evaluation/` 当前只提供三模型 canonical system identity、已知/未知参数 provenance 和 config-only validation。Agent serving、runner、repository sandbox 及 SWE/SWT evaluator 尚未实现；Direct benchmark 不 import OpenHands、mini-swe-agent-plus 或 vLLM。
 
 ## 论文阶段边界
 

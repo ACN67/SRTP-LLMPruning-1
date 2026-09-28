@@ -1,0 +1,17 @@
+project_model_id: swe_lego_qwen3_8b
+display_name: SWE-Lego-Qwen3-8B
+huggingface_repo_id: Lego-X/SWE-Lego-Qwen3-8B
+architecture: Qwen3
+adapter: qwen3
+model_type: qwen3
+expected_model_class: Qwen3ForCausalLM
+revision: 00f37992485b78e9579a2674161d512781aee21e
+default_dtype: bfloat16
+local_path: null
+trust_remote_code: false
+expected_num_hidden_layers: 36
+expected_hidden_size: 4096
+expected_intermediate_size: 12288
+expected_num_attention_heads: 32
+expected_num_key_value_heads: 8
+notes: Standard Qwen3ForCausalLM checkpoint; reuse the Qwen3 adapter.

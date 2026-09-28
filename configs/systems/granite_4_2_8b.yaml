@@ -1,0 +1,103 @@
+system_id: granite_4_2_8b
+project_model_id: granite_4_2_8b
+implementation_status: planned
+
+agent:
+  framework: openhands
+  upstream_repo: https://github.com/All-Hands-AI/OpenHands
+  upstream_revision: null
+  version: null
+  config_path: null
+  agent_class: null
+  max_iterations: null
+  step_limit: null
+  cost_limit: null
+  runs: null
+  mode: null
+  worker_count: null
+  use_hint_text: null
+  instruction_template_name: null
+  enable_plan_mode: null
+  add_in_context_learning_example: null
+  environment_cwd: null
+  command_timeout_seconds: null
+  config_model_temperature: null
+  config_drop_params: null
+  additional_tools: []
+  provenance:
+    status: official_framework_identity
+    sources:
+      - https://huggingface.co/ibm-granite/granite-4.2-8b
+    notes:
+      - OpenHands compatibility is official; the 47.67 score-specific OpenHands recipe is not published
+
+serving:
+  backend: vllm
+  host: null
+  port: null
+  openai_compatible: true
+  served_model_name: granite-4.2-8b
+  tensor_parallel_size: null
+  gpu_memory_utilization: null
+  max_model_len: 131072
+  max_num_seqs: null
+  api_key_semantics: unused-or-user-supplied
+  dtype: bfloat16
+  reasoning_parser: granite_thinking_parser
+  reasoning_parser_plugin: ./granite_thinking_parser.py
+  minimum_backend_version: "0.20"
+  tool_call_parser: qwen3_coder
+  enable_auto_tool_choice: true
+  provenance:
+    status: official_serving_recipe
+    sources:
+      - https://huggingface.co/ibm-granite/granite-4.2-8b
+
+generation:
+  context_length: 131072
+  max_input_tokens: null
+  max_output_tokens: 8192
+  do_sample: true
+  temperature: 1.0
+  top_p: 0.95
+  top_k: null
+  enable_thinking: true
+  truncate_history_thinking: true
+  provenance:
+    status: checkpoint_native
+    sources:
+      - https://huggingface.co/ibm-granite/granite-4.2-8b/tree/f8de16cdcdbc6c779ca517604e050d82cc119e44
+    notes:
+      - thinking is the model-card default; 8192 is the documented thinking-mode output budget
+
+score_identity:
+  benchmark_id: swebench_verified
+  reported_resolved_rate: 0.4767
+  recipe_status: score_recipe_undisclosed
+  unknown_fields:
+    - exact OpenHands version
+    - exact Agent class and prompt template
+    - exact max iterations
+    - exact hint and plan settings
+    - exact run count and seed policy
+  provenance:
+    status: score_recipe_undisclosed
+    sources:
+      - https://huggingface.co/ibm-granite/granite-4.2-8b
+    notes:
+      - official score and OpenHands support are public; the complete 47.67 recipe is not
+
+known_unknowns:
+  - agent.upstream_revision
+  - agent.version
+  - agent.config_path
+  - agent.agent_class
+  - agent.max_iterations
+  - agent.runs
+  - agent.use_hint_text
+  - agent.enable_plan_mode
+  - serving.host
+  - serving.port
+  - serving.tensor_parallel_size
+  - serving.gpu_memory_utilization
+  - serving.max_num_seqs

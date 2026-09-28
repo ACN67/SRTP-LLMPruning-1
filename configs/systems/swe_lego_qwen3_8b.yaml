@@ -1,0 +1,86 @@
+system_id: swe_lego_qwen3_8b
+project_model_id: swe_lego_qwen3_8b
+implementation_status: planned
+
+agent:
+  framework: openhands
+  upstream_repo: https://github.com/All-Hands-AI/OpenHands
+  upstream_revision: null
+  version: "0.53.0"
+  config_path: OpenHands-0.53.0/config.toml
+  agent_class: CodeActAgent
+  max_iterations: 100
+  step_limit: null
+  cost_limit: null
+  runs: 1
+  mode: swe
+  worker_count: 24
+  use_hint_text: false
+  instruction_template_name: swe_default.j2
+  enable_plan_mode: false
+  add_in_context_learning_example: false
+  environment_cwd: null
+  command_timeout_seconds: null
+  config_model_temperature: null
+  config_drop_params: null
+  additional_tools: []
+  provenance:
+    status: official_score_recipe
+    sources:
+      - https://github.com/SWE-Lego/SWE-Lego/blob/94704b69aac886e003660e1e0f69f7de163b284e/scripts/swe_lego_qwen3_8b/infer.sh
+    notes:
+      - worker_count is infrastructure concurrency, not a model capability variable
+
+serving:
+  backend: vllm
+  host: 0.0.0.0
+  port: 8000
+  openai_compatible: true
+  served_model_name: Qwen/Qwen3-8B
+  tensor_parallel_size: 8
+  gpu_memory_utilization: 0.9
+  max_model_len: 163840
+  max_num_seqs: 24
+  api_key_semantics: dummy-key
+  dtype: null
+  reasoning_parser: null
+  reasoning_parser_plugin: null
+  minimum_backend_version: null
+  tool_call_parser: null
+  enable_auto_tool_choice: null
+  provenance:
+    status: official_serving_recipe
+    sources:
+      - https://github.com/SWE-Lego/SWE-Lego/blob/94704b69aac886e003660e1e0f69f7de163b284e/scripts/swe_lego_qwen3_8b/serve_vllm.sh
+    notes:
+      - official script uses the historical SWE-Lego model alias; project model identity is pinned separately
+
+generation:
+  context_length: 163840
+  max_input_tokens: 147456
+  max_output_tokens: 16384
+  do_sample: false
+  temperature: 0.0
+  top_p: null
+  top_k: null
+  enable_thinking: null
+  truncate_history_thinking: null
+  provenance:
+    status: official_score_recipe
+    sources:
+      - https://github.com/SWE-Lego/SWE-Lego/blob/94704b69aac886e003660e1e0f69f7de163b284e/OpenHands-0.53.0/config.toml
+
+score_identity:
+  benchmark_id: swebench_verified
+  reported_resolved_rate: 0.422
+  recipe_status: official_score_recipe
+  unknown_fields: []
+  provenance:
+    status: official_score_recipe
+    sources:
+      - https://github.com/SWE-Lego/SWE-Lego/tree/94704b69aac886e003660e1e0f69f7de163b284e
+
+known_unknowns:
+  - agent.upstream_revision
+  - generation.enable_thinking
+  - generation.truncate_history_thinking
