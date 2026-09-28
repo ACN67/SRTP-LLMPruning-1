@@ -118,6 +118,42 @@ class TinyRealModelTests(unittest.TestCase):
         ranking = rank_blocks_ssn(model, adapter, context(), mode="latter", measure="entropy")
         self.assertEqual(ranking.eligible_original_indices, (3,))
 
+    def test_ddf_qa_qwen_and_granite_end_to_end(self):
+        for kind in ("qwen", "granite"):
+            with self.subTest(kind=kind):
+                torch.manual_seed(23)
+                model, adapter, model_class = tiny_pair(kind)
+                summary = TaBPPruner(
+                    ranking_strategy="ddf", mode="whole", measure="entropy"
+                ).prune(
+                    model, adapter, PruningRequest("tiny", "tabp", 0.25), context()
+                )
+                self.assertEqual(summary.ranking_strategy, "ddf")
+                self.assertEqual(set(summary.ranked_block_indices), set(range(4)))
+                self.assertTrue(
+                    all(math.isfinite(value) for value in summary.scores_by_original_index.values())
+                )
+                self.assertEqual(summary.removed_block_count, 1)
+                self.assertEqual(adapter.get_num_blocks(model), 3)
+                with torch.inference_mode():
+                    logits = model(torch.tensor([[1, 8, 9]])).logits
+                    generated = model.generate(
+                        torch.tensor([[1, 8, 9]]), max_new_tokens=2,
+                        use_cache=True, pad_token_id=0,
+                    )
+                self.assertEqual(tuple(logits.shape), (1, 3, 32))
+                self.assertEqual(generated.shape[1], 5)
+                with tempfile.TemporaryDirectory() as directory:
+                    model.save_pretrained(directory)
+                    reloaded = model_class.from_pretrained(directory).eval()
+                    self.assertEqual(len(adapter.get_blocks(reloaded)), 3)
+                    with torch.inference_mode():
+                        regenerated = reloaded.generate(
+                            torch.tensor([[1, 8]]), max_new_tokens=1,
+                            use_cache=True, pad_token_id=0,
+                        )
+                    self.assertEqual(regenerated.shape[1], 3)
+
     def test_trained_head_is_not_silently_randomized(self):
         model, adapter, _ = tiny_pair("qwen")
         with self.assertRaisesRegex(NotImplementedError, "explicit compatible"):

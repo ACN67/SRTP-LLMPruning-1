@@ -28,6 +28,8 @@ Magnitude/Wanda/SparseGPT 保持原模型深度并产生含零值的 dense tenso
 - [Wanda](wanda.md)
 - [SparseGPT](sparsegpt.md)
 - [SLEB](sleb.md)
+- [TaBP](tabp.md)
+- [SWE-Lego-Qwen3-8B](swe_lego.md)
 - [HumanEval](humaneval.md)
 - [MBPP](mbpp.md)
 - [LiveCodeBench](livecodebench.md)

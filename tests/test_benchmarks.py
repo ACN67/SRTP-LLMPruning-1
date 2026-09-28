@@ -155,10 +155,23 @@ class BenchmarkCliTests(unittest.TestCase):
             self.module.evaluate(args, run_dir, benchmark, [task], 1, profile, False)
             summary = json.loads((run_dir / "evaluation.json").read_text())
             manifest = json.loads((run_dir / "evaluation_manifest.json").read_text())
+            outcomes = self.module._read_jsonl(run_dir / "outcomes.jsonl")
+            errors = self.module._read_jsonl(run_dir / "errors.jsonl")
         self.assertEqual(summary["per_trial_pass_at_1"], [1.0, 0.0])
         self.assertEqual((summary["pass_at_1_mean"], summary["pass_at_1_std"]), (0.5, 0.5))
         self.assertNotIn("pass_at_8", summary)
         self.assertEqual(manifest["evaluator"]["per_test_timeout_seconds"], 1.0)
+        self.assertEqual(len(outcomes), 2)
+        self.assertEqual(len(errors), 1)
+        self.assertEqual(
+            {(row["task_id"], row["trial_index"], row["passed"]) for row in outcomes},
+            {("a", 0, True), ("a", 1, False)},
+        )
+        self.assertTrue(all(row["project_model_id"] == args.model for row in outcomes))
+        self.assertEqual(
+            set(manifest["result_file_hashes"]),
+            {"generations.jsonl", "evaluation.json", "outcomes.jsonl", "errors.jsonl"},
+        )
 
     def test_pruning_plan_records_full_benchmark_provenance(self):
         path = ROOT / "scripts" / "run_experiment.py"
@@ -199,7 +212,9 @@ class BenchmarkCliTests(unittest.TestCase):
             generation_manifest = path / "generation_manifest.json"
             generations.write_text("generation-input", encoding="utf-8")
             generation_manifest.write_text("manifest-input", encoding="utf-8")
-            for name in ("evaluation.json", "evaluation_manifest.json", "errors.jsonl"):
+            for name in (
+                "evaluation.json", "evaluation_manifest.json", "outcomes.jsonl", "errors.jsonl"
+            ):
                 (path / name).write_text("old", encoding="utf-8")
 
             args = self.args(directory)
@@ -210,7 +225,9 @@ class BenchmarkCliTests(unittest.TestCase):
             self.module._prepare_directory(path, args)
             self.assertEqual(generations.read_text(), "generation-input")
             self.assertEqual(generation_manifest.read_text(), "manifest-input")
-            for name in ("evaluation.json", "evaluation_manifest.json", "errors.jsonl"):
+            for name in (
+                "evaluation.json", "evaluation_manifest.json", "outcomes.jsonl", "errors.jsonl"
+            ):
                 self.assertFalse((path / name).exists())
 
             args.phase = "generate"

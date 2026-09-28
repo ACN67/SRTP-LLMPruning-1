@@ -25,6 +25,7 @@ from src.evaluation import (  # noqa: E402
     get_benchmark, list_benchmarks, load_evaluation_profile, task_id_hash,
 )
 from src.evaluation.generation import generate_one  # noqa: E402
+from src.analysis import checkpoint_size_bytes  # noqa: E402
 from src.models import (  # noqa: E402
     LoadOptions, get_model_adapter, list_model_ids, load_model_artifact, load_model_spec,
 )
@@ -80,7 +81,9 @@ def _prepare_directory(path: Path, args: argparse.Namespace) -> None:
             raise ValueError("Run directory is non-empty; use --resume or --overwrite")
     if args.phase == "evaluate" and path.exists():
         evaluation_outputs = tuple(
-            path / name for name in ("evaluation.json", "evaluation_manifest.json", "errors.jsonl")
+            path / name for name in (
+                "evaluation.json", "evaluation_manifest.json", "outcomes.jsonl", "errors.jsonl"
+            )
         )
         existing_outputs = [output for output in evaluation_outputs if output.exists()]
         if existing_outputs and not args.overwrite:
@@ -151,6 +154,7 @@ def _artifact_provenance(args: argparse.Namespace) -> dict[str, Any]:
         return {"kind": args.artifact_kind, "label": args.artifact_label, "path": None}
     path = args.artifact_path.resolve()
     result: dict[str, Any] = {"kind": args.artifact_kind, "label": args.artifact_label, "path": str(path)}
+    result["checkpoint_bytes"] = checkpoint_size_bytes(path)
     sidecar = path / ".srtp_model_source.json"
     if sidecar.is_file():
         result["model_source"] = json.loads(sidecar.read_text(encoding="utf-8"))
@@ -250,9 +254,26 @@ def generate(args: argparse.Namespace, run_dir: Path, benchmark: Any, tasks: lis
             _write_jsonl(run_dir / "generations.jsonl", [by_key[item] for item in ordered_keys if item in by_key])
     manifest = _manifest_base(args, benchmark, tasks, full_count, profile, overridden)
     artifact = {**_artifact_provenance(args), "structure": dict(loaded.structure)}
+    successful = [record for record in by_key.values() if record.get("generation_success")]
+    measured_wall = sum(float(record.get("generation_wall_time_seconds", 0.0)) for record in successful)
+    measured_tokens = sum(int(record.get("generated_tokens", 0)) for record in successful)
+    peaks = [record["peak_cuda_vram_bytes"] for record in successful
+             if record.get("peak_cuda_vram_bytes") is not None]
     manifest.update({"phase": "generation", "effective_evaluation_profile": profile.to_dict(),
                      "artifact": artifact,
-                     "source_generation_config_sha256": artifact.get("generation_config_sha256")})
+                     "source_generation_config_sha256": artifact.get("generation_config_sha256"),
+                     "runtime": {
+                         "generation_wall_time_seconds": measured_wall,
+                         "prompt_tokens": sum(int(record.get("prompt_tokens", 0)) for record in successful),
+                         "generated_tokens": measured_tokens,
+                         "generated_tokens_per_second": (
+                             measured_tokens / measured_wall if measured_wall > 0 else None
+                         ),
+                         "peak_cuda_vram_bytes": max(peaks) if peaks else None,
+                         "ttft_seconds": None,
+                         "tpot_seconds": None,
+                         "serving_metrics_status": "not_measured_without_serving_layer",
+                     }})
     (run_dir / "generation_manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 
 
@@ -281,7 +302,17 @@ def evaluate(args: argparse.Namespace, run_dir: Path, benchmark: Any, tasks: lis
                 outcome = {"task_id": task.task_id, "passed": False, "status": "generation_error", "error": record["error"]}
             else:
                 outcome = vars(benchmark.evaluate(task, record["processed_generation"], timeout=args.timeout))
-            outcomes.append({"trial_index": trial, **outcome})
+            outcomes.append({
+                "benchmark": record["benchmark"],
+                "project_model_id": record["project_model_id"],
+                "artifact_kind": record["artifact_kind"],
+                "artifact_label": record["artifact_label"],
+                "evaluation_profile_id": record["evaluation_profile_id"],
+                "prompt_sha256": record["prompt_sha256"],
+                "generation_success": bool(record["generation_success"]),
+                "trial_index": trial,
+                **outcome,
+            })
     trial_scores = []
     for trial in range(profile.num_trials):
         trial_rows = [row for row in outcomes if row["trial_index"] == trial]
@@ -299,6 +330,7 @@ def evaluate(args: argparse.Namespace, run_dir: Path, benchmark: Any, tasks: lis
         "pass_at_1_std": statistics.pstdev(trial_scores) if len(trial_scores) > 1 else 0.0,
     }
     (run_dir / "evaluation.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+    _write_jsonl(run_dir / "outcomes.jsonl", outcomes)
     _write_jsonl(run_dir / "errors.jsonl", [row for row in outcomes if not row["passed"]])
     manifest = _manifest_base(args, benchmark, tasks, full_count, profile, overridden)
     generated_manifest_path = run_dir / "generation_manifest.json"
@@ -311,7 +343,7 @@ def evaluate(args: argparse.Namespace, run_dir: Path, benchmark: Any, tasks: lis
             if args.benchmark == "livecodebench" else None,
         },
         "result_file_hashes": {name: _sha256(run_dir / name) for name in
-                               ("generations.jsonl", "evaluation.json", "errors.jsonl")},
+                               ("generations.jsonl", "evaluation.json", "outcomes.jsonl", "errors.jsonl")},
         "artifact": generated_manifest.get("artifact", _artifact_provenance(args)),
         "pruning_provenance": generated_manifest.get("artifact", {}).get("pruning"),
     })

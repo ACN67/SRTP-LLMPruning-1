@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import random
+import time
 from typing import Any, Mapping, Sequence
 
 from .profiles import EvaluationProfile
@@ -87,16 +88,41 @@ def generate_one(
         for key, value in effective_sampling.items():
             if value is not None:
                 kwargs[key] = value
+    cuda_device = None
+    try:
+        import torch
+        candidate = getattr(model, "device", None)
+        if candidate is None:
+            candidate = next(model.parameters()).device
+        candidate = torch.device(candidate) if candidate is not None else None
+        if candidate is not None and candidate.type == "cuda" and torch.cuda.is_available():
+            cuda_device = candidate
+            torch.cuda.synchronize(cuda_device)
+            torch.cuda.reset_peak_memory_stats(cuda_device)
+    except (AttributeError, ImportError, StopIteration, RuntimeError, TypeError):
+        cuda_device = None
+    started = time.perf_counter()
     output = model.generate(**encoded, **kwargs)
+    if cuda_device is not None:
+        torch.cuda.synchronize(cuda_device)
+    wall_time = time.perf_counter() - started
+    peak_cuda_vram = (
+        int(torch.cuda.max_memory_allocated(cuda_device))
+        if cuda_device is not None else None
+    )
     prompt_tokens = input_ids.shape[-1]
     generated = output[0, prompt_tokens:]
     raw = tokenizer.decode(generated, skip_special_tokens=True)
+    generated_tokens = int(generated.numel())
     return {
         "prompt": rendered_prompt,
         "prompt_sha256": hashlib.sha256(rendered_prompt.encode("utf-8")).hexdigest(),
         "raw_generation": raw,
         "prompt_tokens": int(prompt_tokens),
-        "generated_tokens": int(generated.numel()),
+        "generated_tokens": generated_tokens,
+        "generation_wall_time_seconds": wall_time,
+        "generated_tokens_per_second": generated_tokens / wall_time,
+        "peak_cuda_vram_bytes": peak_cuda_vram,
         "truncated": False,
         "seed": seed,
         "chat_template_used": profile.use_chat_template,

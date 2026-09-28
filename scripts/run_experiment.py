@@ -8,6 +8,7 @@ import hashlib
 import json
 import math
 import sys
+import time
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -27,6 +28,7 @@ from src.models import (  # noqa: E402
     load_dense_model,
     load_model_spec,
 )
+from src.analysis import checkpoint_size_bytes  # noqa: E402
 from src.evaluation import load_evaluation_profile  # noqa: E402
 from src.calibration_assets import load_local_c4, load_local_wikitext2  # noqa: E402
 from src.pruning import (  # noqa: E402
@@ -521,6 +523,27 @@ class PreparedPruningMethod(NamedTuple):
     reduced_depth: bool = False
 
 
+def _start_cuda_peak(model: Any) -> Any | None:
+    try:
+        import torch
+        device = next(model.parameters()).device
+        if device.type != "cuda" or not torch.cuda.is_available():
+            return None
+        torch.cuda.synchronize(device)
+        torch.cuda.reset_peak_memory_stats(device)
+        return device
+    except (ImportError, StopIteration, RuntimeError):
+        return None
+
+
+def _finish_cuda_peak(device: Any | None) -> int | None:
+    if device is None:
+        return None
+    import torch
+    torch.cuda.synchronize(device)
+    return int(torch.cuda.max_memory_allocated(device))
+
+
 def _prepare_pruning_method(
     args: argparse.Namespace,
     pruning_config: dict[str, Any],
@@ -628,18 +651,25 @@ def execute_experiment(args: argparse.Namespace) -> dict[str, Any]:
         options=options,
         loaded=loaded,
     )
+    cuda_device = _start_cuda_peak(loaded.model)
+    pruning_started = time.perf_counter()
     if prepared.context is not None:
         summary = prepared.pruner.prune(
             loaded.model, adapter, request, prepared.context
         )
     else:
         summary = prepared.pruner.prune(loaded.model, adapter, request)
+    pruning_wall_time = time.perf_counter() - pruning_started
+    peak_cuda_vram = _finish_cuda_peak(cuda_device)
     if prepared.reduced_depth:
         loaded = replace(loaded, structure=adapter.get_structure(loaded.model))
 
     output_dir.mkdir(parents=True, exist_ok=True)
     loaded.model.save_pretrained(output_dir)
     loaded.tokenizer.save_pretrained(output_dir)
+    checkpoint_bytes = checkpoint_size_bytes(
+        output_dir, exclude_names=("pruning_manifest.json",)
+    )
 
     model_record = build_model_manifest(
         spec,
@@ -670,6 +700,11 @@ def execute_experiment(args: argparse.Namespace) -> dict[str, Any]:
             "path": str(output_dir),
             "model_saved": True,
             "tokenizer_saved": True,
+            "bytes_excluding_pruning_manifest": checkpoint_bytes,
+        },
+        "runtime": {
+            "pruner_call_wall_time_seconds": pruning_wall_time,
+            "peak_cuda_vram_bytes": peak_cuda_vram,
         },
         "evaluation": None,
     }

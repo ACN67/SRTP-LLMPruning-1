@@ -204,6 +204,13 @@ class TinyGenerationTests(unittest.TestCase):
                               profile=profile, seed=7)
         self.assertEqual(result["raw_generation"], "generated")
         self.assertEqual(result["seed"], 7)
+        self.assertEqual(result["prompt_tokens"], 3)
+        self.assertGreater(result["generation_wall_time_seconds"], 0)
+        self.assertEqual(result["peak_cuda_vram_bytes"], None)
+        self.assertAlmostEqual(
+            result["generated_tokens_per_second"],
+            result["generated_tokens"] / result["generation_wall_time_seconds"],
+        )
         self.assertNotIn("eos_token_id", model.generation_config.to_diff_dict() if hasattr(model.generation_config, "to_diff_dict") else {})
         self.assertTrue(result["chat_template_used"])
         effective = result["effective_generation_config"]
