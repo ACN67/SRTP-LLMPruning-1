@@ -33,7 +33,9 @@ class BenchmarkEndToEndTests(unittest.TestCase):
                 instance = adapter.load_instance({"instance_id": "tiny__repo-1", "repo": str(source), "base_commit": commit, "problem_statement": "Create result.txt containing fixed"})
                 provisioned = provision_repository(instance.repo, instance.base_commit, instance.instance_id, repo_cache_root=root / "cache", workspace_root=root / "work", offline=True)
                 system = load_agent_system_spec("klear_agentforge_8b")
-                artifact = resolve_artifact(system, make_artifact(root / "model"))
+                artifact = resolve_artifact(
+                    system, make_artifact(root / "model"), allow_unverified_model=True
+                )
                 endpoint = f"http://127.0.0.1:{httpd.server_address[1]}"
                 with VLLMServer(system, artifact, root / "server", endpoint=endpoint, startup_timeout=2) as server:
                     result = get_agent_runner(system).run(adapter.prepare_task(instance, provisioned.worktree_path), server.endpoint, root / "agent", timeout=60, artifact_provenance=artifact.to_dict())
@@ -44,7 +46,7 @@ class BenchmarkEndToEndTests(unittest.TestCase):
                 parsed = adapter.parse_report(report_path)
                 now = datetime.now(timezone.utc).isoformat()
                 benchmark_result = AgentBenchmarkResult(adapter.benchmark_id, instance.instance_id, system.system_id, artifact.to_dict(), str(root / "agent/agent_result.json"), str(root / "predictions.jsonl"), prediction_sha256(prediction), "completed", parsed["per_instance"][instance.instance_id]["resolved"], str(report_path), {"harness_revision": adapter.spec.harness.revision}, now, now, result.runtime_seconds)
-                self.assertEqual(result.status, "success")
+                self.assertEqual(result.status, "patch_generated")
                 self.assertIn("result.txt", result.changed_files)
                 self.assertEqual(len(digest), 64)
                 self.assertTrue(benchmark_result.success)

@@ -176,7 +176,7 @@ class AgentRunner:
         }
         if bridge_path.is_file():
             framework_metadata = json.loads(bridge_path.read_text(encoding="utf-8"))
-        status = "success" if returncode == 0 and bool(patch) else "agent_failure"
+        status = "patch_generated" if returncode == 0 and bool(patch) else "generation_failed"
         if returncode == 0 and not patch:
             error_type, error_message = "EmptyPatch", "Agent completed without repository changes"
         trajectory = output / "trajectory.json"

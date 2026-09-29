@@ -16,6 +16,7 @@ from src.models import (
     get_model_adapter, list_model_ids, load_model_spec, load_snapshot_manifest,
     snapshot_manifest_sha256, verify_runtime_snapshot,
 )
+from src.artifacts import artifact_inventory
 
 
 def verify_snapshot(model_id: str, path: Path) -> dict:
@@ -31,7 +32,6 @@ def verify_snapshot(model_id: str, path: Path) -> dict:
         raise ValueError("Snapshot is missing .srtp_model_source.json")
     sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
     for key, expected in {
-        "schema_version": 2,
         "project_model_id": model_id,
         "canonical_hf_repo": manifest["canonical_hf_repo"],
         "canonical_hf_revision": manifest["canonical_hf_revision"],
@@ -42,6 +42,21 @@ def verify_snapshot(model_id: str, path: Path) -> dict:
             raise ValueError(f"Snapshot provenance mismatch for {key}")
     if not sidecar.get("download_endpoint") or not sidecar.get("download_transport"):
         raise ValueError("Snapshot provenance is missing transport information")
+
+    inventory, content_sha256 = artifact_inventory(path)
+    expected_paths = {item["path"] for item in manifest["required_runtime_files"]}
+    actual_paths = {item["path"] for item in inventory}
+    if actual_paths != expected_paths:
+        raise ValueError(
+            "Snapshot contains missing or unexpected runtime files: "
+            f"missing={sorted(expected_paths - actual_paths)}, "
+            f"unexpected={sorted(actual_paths - expected_paths)}"
+        )
+    sidecar.update({
+        "schema_version": 3,
+        "verification_status": "verified",
+        "verified_artifact_content_sha256": content_sha256,
+    })
 
     config = AutoConfig.from_pretrained(
         str(path), trust_remote_code=spec.trust_remote_code, local_files_only=True
@@ -68,10 +83,12 @@ def verify_snapshot(model_id: str, path: Path) -> dict:
     )
     if referenced != declared_shards:
         raise ValueError("Weight index shards do not match the runtime snapshot manifest")
+    sidecar_path.write_text(json.dumps(sidecar, indent=2) + "\n", encoding="utf-8")
     return {
         "status": "pass", "project_model_id": model_id,
         "config_class": type(config).__name__, "tokenizer_class": type(tokenizer).__name__,
         "runtime_file_count": len(verified), "referenced_weight_shards": len(referenced),
+        "artifact_content_sha256": content_sha256,
     }
 
 

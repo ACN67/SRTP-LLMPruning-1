@@ -81,9 +81,10 @@ agent:
     notes:
       - The official config does not enable native tool calling or a vLLM tool parser; false is the explicit compatible baseline.
 
-score_identity:
+upstream_reference_result:
   benchmark_id: swebench_verified
-  reported_resolved_rate: 0.422
+  upstream_reported_resolved_rate: 0.422
+  reproduced_by_this_repository: false
   recipe_status: official_score_recipe
   undisclosed_fields: []
   provenance:

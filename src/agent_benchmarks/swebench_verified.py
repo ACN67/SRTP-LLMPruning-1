@@ -37,7 +37,7 @@ class SWEbenchVerifiedAdapter:
         return RepositoryTask(instance.instance_id, repo_path, instance.problem_statement, instance.base_commit)
 
     def build_prediction(self, result: AgentResult) -> dict[str, Any]:
-        patch = Path(result.patch_path).read_text(encoding="utf-8") if result.status == "success" else ""
+        patch = Path(result.patch_path).read_text(encoding="utf-8") if result.status == "patch_generated" else ""
         return validate_prediction({"instance_id": result.task_id, "model_name_or_path": result.system_id, "model_patch": patch}, allow_full_output=False)
 
     def evaluator_command(self, predictions: Path, run_id: str, workers: int, *, instance_ids: Sequence[str] = (), task_repo: Path | None = None, report_dir: Path | None = None, gold: bool = False, dataset_path: Path | None = None) -> tuple[str, ...]:

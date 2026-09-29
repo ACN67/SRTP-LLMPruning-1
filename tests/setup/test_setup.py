@@ -121,19 +121,26 @@ class ModelTransportTests(unittest.TestCase):
         self.assertNotIn("local_files_only", destinations)
         self.assertNotIn("--local-files-only", self.module._parser().format_help())
 
-    def test_default_domestic_writes_v2_sidecar_after_complete_success(self):
+    def test_default_domestic_writes_v3_sidecar_after_complete_success(self):
         manifest = tiny_manifest()
         with tempfile.TemporaryDirectory() as directory, patch.object(
             self.module, "load_snapshot_manifest", return_value=manifest
         ), patch.object(self.module, "verified_download") as download, patch.object(
             self.module, "verify_runtime_snapshot", return_value=manifest["required_runtime_files"]
-        ), patch.object(self.module, "snapshot_manifest_sha256", return_value="m" * 64):
+        ), patch.object(self.module, "snapshot_manifest_sha256", return_value="m" * 64), patch.object(
+            self.module, "artifact_inventory", return_value=(
+                [{"path": item["path"]} for item in manifest["required_runtime_files"]],
+                "c" * 64,
+            )
+        ):
             self.module.download_model("klear_agentforge_8b", Path(directory))
             sidecar = json.loads(Path(directory, "klear_agentforge_8b", ".srtp_model_source.json").read_text())
         self.assertEqual(download.call_count, 2)
         self.assertTrue(all("modelscope.cn" in call.args[0] for call in download.call_args_list))
         self.assertEqual(sidecar["download_transport"], "modelscope_resolve")
         self.assertEqual(sidecar["canonical_hf_revision"], manifest["canonical_hf_revision"])
+        self.assertEqual(sidecar["schema_version"], 3)
+        self.assertEqual(sidecar["verified_artifact_content_sha256"], "c" * 64)
 
     def test_partial_failure_never_writes_sidecar_or_falls_back(self):
         manifest = tiny_manifest()
@@ -195,6 +202,7 @@ class ModelTransportTests(unittest.TestCase):
             (root / "model.safetensors.index.json").write_text(json.dumps({
                 "weight_map": {"x": "model-00001-of-00001.safetensors"}
             }))
+            (root / "model-00001-of-00001.safetensors").write_bytes(b"x")
             sidecar = {
                 "schema_version": 2, "project_model_id": "klear_agentforge_8b",
                 "canonical_hf_repo": manifest["canonical_hf_repo"],
@@ -213,8 +221,12 @@ class ModelTransportTests(unittest.TestCase):
                 "transformers.AutoTokenizer.from_pretrained", return_value=object()
             ):
                 result = module.verify_snapshot("klear_agentforge_8b", root)
+            upgraded = json.loads((root / ".srtp_model_source.json").read_text())
         runtime_verify.assert_called_once_with("klear_agentforge_8b", root.resolve())
         self.assertEqual(result["referenced_weight_shards"], 1)
+        self.assertEqual(upgraded["schema_version"], 3)
+        self.assertEqual(upgraded["verification_status"], "verified")
+        self.assertEqual(upgraded["verified_artifact_content_sha256"], result["artifact_content_sha256"])
 
 
 class CalibrationAssetTests(unittest.TestCase):

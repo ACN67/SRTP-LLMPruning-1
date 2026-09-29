@@ -31,8 +31,20 @@ def _load_reduced(spec: ModelSpec, adapter: BaseModelAdapter, path: Path, option
     return LoadedModel(model, tokenizer, config, str(path), True, spec.revision, None, str(model.dtype).removeprefix("torch."), structure)
 
 
-def load_model_artifact(spec: ModelSpec, adapter: BaseModelAdapter, artifact_path: Path, *, options: LoadOptions | None = None, kind: str | None = None) -> LoadedModel:
-    options = options or LoadOptions(); artifact = resolve_model_artifact(artifact_path, spec, adapter)
+def load_model_artifact(
+    spec: ModelSpec,
+    adapter: BaseModelAdapter,
+    artifact_path: Path,
+    *,
+    options: LoadOptions | None = None,
+    kind: str | None = None,
+    require_verified_dense: bool = False,
+    base_artifact_path: Path | None = None,
+) -> LoadedModel:
+    options = options or LoadOptions()
+    artifact = resolve_model_artifact(
+        artifact_path, spec, adapter, require_verified_dense=require_verified_dense,
+    )
     if kind is not None and kind != artifact.kind:
         raise ValueError(f"Requested artifact kind {kind!r} does not match {artifact.kind!r}")
     if artifact.representation == "full_checkpoint":
@@ -40,13 +52,17 @@ def load_model_artifact(spec: ModelSpec, adapter: BaseModelAdapter, artifact_pat
             return load_dense_model(spec, adapter, replace(options, local_path=Path(artifact.path)))
         return _load_reduced(spec, adapter, Path(artifact.path), options, artifact.num_hidden_layers)
     if artifact.representation != "peft_adapter": raise ValueError(f"Unsupported artifact representation: {artifact.representation}")
-    base_path = artifact.metadata.get("base_artifact_path")
+    base_path = base_artifact_path or artifact.metadata.get("base_artifact_path")
     base_hash = artifact.metadata.get("base_artifact_hash")
-    if not isinstance(base_path, str):
-        raise ValueError("PEFT adapter manifest lacks base_artifact_path")
+    if not isinstance(base_path, (str, Path)):
+        raise ValueError(
+            "PEFT adapter base artifact location is unavailable; pass --base-artifact-path"
+        )
     if not isinstance(base_hash, str) or len(base_hash) != 64:
         raise ValueError("PEFT adapter manifest lacks a valid base_artifact_hash")
-    resolved_base = resolve_model_artifact(Path(base_path), spec, adapter)
+    resolved_base = resolve_model_artifact(
+        Path(base_path), spec, adapter, require_verified_dense=require_verified_dense,
+    )
     if resolved_base.content_sha256 != base_hash:
         raise ValueError(
             "PEFT adapter base artifact hash mismatch: "
@@ -55,7 +71,10 @@ def load_model_artifact(spec: ModelSpec, adapter: BaseModelAdapter, artifact_pat
     recovery_ops = [item for item in artifact.lineage if item.operation == "recovery"]
     if not recovery_ops or recovery_ops[-1].input_artifact_hash != base_hash:
         raise ValueError("PEFT adapter recovery lineage does not match its base artifact hash")
-    base = load_model_artifact(spec, adapter, Path(base_path), options=options)
+    base = load_model_artifact(
+        spec, adapter, Path(base_path), options=options,
+        require_verified_dense=require_verified_dense,
+    )
     from peft import PeftModel
     model = PeftModel.from_pretrained(base.model, artifact.path)
     model.eval()

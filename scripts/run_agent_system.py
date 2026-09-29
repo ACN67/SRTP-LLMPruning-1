@@ -27,9 +27,11 @@ from src.agent_runner import (  # noqa: E402
 from src.agent_runner.serving import (  # noqa: E402
     ServingStartupError, build_vllm_command, resolve_granite_parser,
 )
+from src.agent_runner.task import extract_patch  # noqa: E402
+from src.utils.identity import build_resume_identity, require_matching_resume_identity  # noqa: E402
 
 
-SCHEMA_VERSION = "1.0"
+SCHEMA_VERSION = "2.0"
 
 
 def _now() -> str:
@@ -78,10 +80,12 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--startup-timeout", type=float, default=600)
     parser.add_argument("--agent-timeout", type=float, default=3600)
     parser.add_argument("--parser-plugin", type=Path)
-    parser.add_argument("--overwrite", action="store_true")
-    parser.add_argument("--resume", action="store_true")
+    output_mode = parser.add_mutually_exclusive_group()
+    output_mode.add_argument("--overwrite", action="store_true")
+    output_mode.add_argument("--resume", action="store_true")
     parser.add_argument("--allow-dirty", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--allow-unverified-model", action="store_true")
     return parser
 
 
@@ -98,13 +102,16 @@ def _sanitized_serving(serving: object) -> dict[str, Any]:
 
 def main() -> int:
     args = _parser().parse_args()
+    if args.resume and args.allow_dirty:
+        raise SystemExit("--resume cannot be combined with --allow-dirty")
     output = args.output_dir.expanduser().resolve()
     manifest_path = output / "run_manifest.json"
-    if args.resume and manifest_path.is_file():
-        previous = json.loads(manifest_path.read_text(encoding="utf-8"))
-        if previous.get("result", {}).get("status") == "success":
-            print(json.dumps(previous, indent=2, ensure_ascii=False))
-            return 0
+    previous_resume_manifest = (
+        json.loads(manifest_path.read_text(encoding="utf-8"))
+        if args.resume and manifest_path.is_file() else None
+    )
+    if args.resume and previous_resume_manifest is None:
+        raise SystemExit("Cannot resume single Agent run: existing run_manifest.json is missing")
     if output.exists() and any(output.iterdir()) and not (args.overwrite or args.resume):
         print(f"Output directory is not empty: {output}; use --overwrite or --resume", file=sys.stderr)
         return 2
@@ -120,6 +127,7 @@ def main() -> int:
                 path.unlink()
 
     server: VLLMServer | None = None
+    preserve_previous_manifest = False
     manifest: dict[str, Any] = {"schema_version": SCHEMA_VERSION, "started_at": _now()}
     try:
         system = load_agent_system_spec(args.system)
@@ -132,7 +140,10 @@ def main() -> int:
             }.items() if value is not None
         }
         serving = system.serving.with_overrides(overrides)
-        artifact = resolve_artifact(system, args.artifact_path)
+        artifact = resolve_artifact(
+            system, args.artifact_path,
+            allow_unverified_model=args.allow_unverified_model,
+        )
         parser_plugin = resolve_granite_parser(system, args.parser_plugin)
         task = RepositoryTask(
             task_id=args.task_id or args.task_file.stem,
@@ -140,7 +151,7 @@ def main() -> int:
             problem_statement=args.task_file.read_text(encoding="utf-8"),
             base_commit=args.base_commit,
         )
-        before = task.validate(allow_dirty=args.allow_dirty)
+        before = task.validate(allow_dirty=args.allow_dirty or args.resume)
         runner = get_agent_runner(system)
         git_status = _git("status", "--porcelain=v1", "--untracked-files=all")
         manifest.update({
@@ -157,7 +168,54 @@ def main() -> int:
             "runtime": _hardware(),
             "pins": {"vllm": serving.version, "agent_version": system.agent.version, "agent_revision": system.agent.upstream_revision},
             "dry_run": args.dry_run,
+            "model_provenance_policy": (
+                "explicit_unverified_opt_in" if args.allow_unverified_model else "verified_dense_or_canonical_artifact_required"
+            ),
         })
+        resume_identity = build_resume_identity(
+            artifact_content_sha256=artifact.inventory_sha256,
+            system_id=system.system_id,
+            system_config_hash=system.canonical_config_hash,
+            agent_timeout_seconds=args.agent_timeout,
+            endpoint_reused=bool(args.endpoint),
+            allow_dirty=args.allow_dirty,
+            dry_run=args.dry_run,
+            task={
+                "task_id": task.task_id,
+                "problem_statement_sha256": hashlib.sha256(
+                    task.problem_statement.encode("utf-8")
+                ).hexdigest(),
+                "base_commit": task.base_commit or before.head_commit,
+                "repository_head": before.head_commit,
+            },
+            serving_config=_sanitized_serving(serving),
+        )
+        manifest["resume_identity"] = resume_identity
+        if previous_resume_manifest is not None:
+            try:
+                require_matching_resume_identity(
+                    previous_resume_manifest, resume_identity, scope="single Agent run",
+                )
+            except ValueError:
+                preserve_previous_manifest = True
+                raise
+            if previous_resume_manifest.get("result", {}).get("status") == "patch_generated":
+                current_patch, _changed_files = extract_patch(task.repo_path)
+                expected_patch_sha256 = previous_resume_manifest["result"].get("patch_sha256")
+                actual_patch_sha256 = hashlib.sha256(current_patch.encode("utf-8")).hexdigest()
+                if actual_patch_sha256 != expected_patch_sha256:
+                    preserve_previous_manifest = True
+                    raise ValueError(
+                        "Cannot resume completed single Agent run: repository patch changed"
+                    )
+                preserve_previous_manifest = True
+                print(json.dumps(previous_resume_manifest, indent=2, ensure_ascii=False))
+                return 0
+            if before.dirty:
+                preserve_previous_manifest = True
+                raise ValueError(
+                    "Cannot continue an incomplete single Agent run from a dirty repository"
+                )
         if args.dry_run:
             endpoint = args.endpoint or f"http://127.0.0.1:{serving.port}"
             manifest["endpoint"] = endpoint
@@ -181,7 +239,7 @@ def main() -> int:
         )
         manifest["endpoint"] = server.endpoint
         manifest["result"] = result.to_dict()
-        exit_code = 0 if result.status == "success" else 4
+        exit_code = 0 if result.status == "patch_generated" else 4
         if not (args.keep_server and not server.external and exit_code == 0):
             server.stop()
         manifest["serving"] = server.manifest()
@@ -206,8 +264,9 @@ def main() -> int:
         if server is not None and not (args.keep_server and server.process is not None and server.process.poll() is None and "error" not in manifest):
             server.stop()
         manifest["ended_at"] = _now()
-        output.mkdir(parents=True, exist_ok=True)
-        _write(manifest_path, manifest)
+        if not preserve_previous_manifest:
+            output.mkdir(parents=True, exist_ok=True)
+            _write(manifest_path, manifest)
     print(json.dumps(manifest, indent=2, ensure_ascii=False), file=sys.stderr)
     return code
 

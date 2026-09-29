@@ -106,6 +106,10 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--local-files-only", action="store_true")
     parser.add_argument(
+        "--allow-unverified-model", action="store_true",
+        help="development-only opt-in for a local dense checkpoint without verified provenance",
+    )
+    parser.add_argument(
         "--datasets-root", type=Path, default=Path("/data/datasets"),
         help="root containing pre-materialized calibration datasets",
     )
@@ -524,25 +528,36 @@ class PreparedPruningMethod(NamedTuple):
     reduced_depth: bool = False
 
 
-def _start_cuda_peak(model: Any) -> Any | None:
+def _start_cuda_peak(model: Any) -> tuple[Any, ...]:
     try:
         import torch
-        device = next(model.parameters()).device
-        if device.type != "cuda" or not torch.cuda.is_available():
-            return None
-        torch.cuda.synchronize(device)
-        torch.cuda.reset_peak_memory_stats(device)
-        return device
-    except (ImportError, StopIteration, RuntimeError):
-        return None
+        if not torch.cuda.is_available():
+            return ()
+        values = list(getattr(model, "hf_device_map", {}).values())
+        if not values:
+            values = [next(model.parameters()).device]
+        devices = []
+        for value in values:
+            device = torch.device("cuda", value) if isinstance(value, int) else torch.device(value)
+            if device.type == "cuda" and device not in devices:
+                devices.append(device)
+        for device in devices:
+            torch.cuda.synchronize(device)
+            torch.cuda.reset_peak_memory_stats(device)
+        return tuple(devices)
+    except (ImportError, StopIteration, RuntimeError, TypeError):
+        return ()
 
 
-def _finish_cuda_peak(device: Any | None) -> int | None:
-    if device is None:
-        return None
+def _finish_cuda_peak(devices: tuple[Any, ...]) -> dict[str, int]:
+    if not devices:
+        return {}
     import torch
-    torch.cuda.synchronize(device)
-    return int(torch.cuda.max_memory_allocated(device))
+    result = {}
+    for device in devices:
+        torch.cuda.synchronize(device)
+        result[str(device)] = int(torch.cuda.max_memory_allocated(device))
+    return result
 
 
 def _prepare_pruning_method(
@@ -644,7 +659,10 @@ def execute_experiment(args: argparse.Namespace) -> dict[str, Any]:
     adapter = get_model_adapter(spec)
     options = _load_options(args)
     input_artifact = (
-        resolve_model_artifact(args.local_path, spec, adapter)
+        resolve_model_artifact(
+            args.local_path, spec, adapter,
+            require_verified_dense=not getattr(args, "allow_unverified_model", False),
+        )
         if args.local_path is not None
         else None
     )
@@ -657,7 +675,7 @@ def execute_experiment(args: argparse.Namespace) -> dict[str, Any]:
         options=options,
         loaded=loaded,
     )
-    cuda_device = _start_cuda_peak(loaded.model)
+    cuda_devices = _start_cuda_peak(loaded.model)
     pruning_started = time.perf_counter()
     if prepared.context is not None:
         summary = prepared.pruner.prune(
@@ -666,7 +684,7 @@ def execute_experiment(args: argparse.Namespace) -> dict[str, Any]:
     else:
         summary = prepared.pruner.prune(loaded.model, adapter, request)
     pruning_wall_time = time.perf_counter() - pruning_started
-    peak_cuda_vram = _finish_cuda_peak(cuda_device)
+    peak_cuda_vram = _finish_cuda_peak(cuda_devices)
     if prepared.reduced_depth:
         loaded = replace(loaded, structure=adapter.get_structure(loaded.model))
 
@@ -745,8 +763,15 @@ def execute_experiment(args: argparse.Namespace) -> dict[str, Any]:
             "checkpoint_bytes": checkpoint_bytes,
             "runtime": {
                 "pruner_call_wall_time_seconds": pruning_wall_time,
-                "peak_cuda_vram_bytes": peak_cuda_vram,
+                "peak_cuda_vram_per_device_bytes": peak_cuda_vram or None,
+                "peak_cuda_vram_max_device_bytes": (
+                    max(peak_cuda_vram.values()) if peak_cuda_vram else None
+                ),
             },
+            "model_provenance_policy": (
+                "explicit_unverified_opt_in"
+                if getattr(args, "allow_unverified_model", False) else "verified_dense_or_pinned_source_required"
+            ),
         },
     )
     write_artifact_manifest(output_dir, artifact)

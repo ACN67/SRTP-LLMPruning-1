@@ -8,6 +8,7 @@ import math
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import torch
 
@@ -113,7 +114,13 @@ class EfficiencyTests(unittest.TestCase):
         module = importlib.util.module_from_spec(spec)
         assert spec.loader is not None
         spec.loader.exec_module(module)
-        self.assertIsNone(module._start_cuda_peak(torch.nn.Linear(2, 2)))
+        self.assertEqual(module._start_cuda_peak(torch.nn.Linear(2, 2)), ())
+        model = type("Mapped", (), {"hf_device_map": {"a": 0, "b": 1, "c": 0, "d": "cpu"}})()
+        with patch("torch.cuda.is_available", return_value=True), patch(
+            "torch.cuda.synchronize"
+        ), patch("torch.cuda.reset_peak_memory_stats"):
+            devices = module._start_cuda_peak(model)
+        self.assertEqual(tuple(str(device) for device in devices), ("cuda:0", "cuda:1"))
 
 
 class AnalyzeResultsCliTests(unittest.TestCase):

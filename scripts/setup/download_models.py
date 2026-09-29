@@ -21,6 +21,7 @@ from src.models import (
     verify_runtime_snapshot,
 )
 from src.models.snapshots import select_runtime_files
+from src.artifacts import artifact_inventory
 
 
 MODELSCOPE_ENDPOINT = "https://modelscope.cn/models"
@@ -84,8 +85,18 @@ def download_model(
         transport_endpoint = endpoint or (
             MODELSCOPE_ENDPOINT if download_source == "domestic" else OFFICIAL_HF_ENDPOINT
         )
+        inventory, content_sha256 = artifact_inventory(target)
+        expected_paths = {item["path"] for item in manifest["required_runtime_files"]}
+        actual_paths = {item["path"] for item in inventory}
+        if actual_paths != expected_paths:
+            raise ValueError(
+                "Downloaded snapshot contains missing or unexpected runtime files: "
+                f"missing={sorted(expected_paths - actual_paths)}, "
+                f"unexpected={sorted(actual_paths - expected_paths)}"
+            )
         sidecar = {
-            "schema_version": 2,
+            "schema_version": 3,
+            "verification_status": "verified",
             "project_model_id": model_id,
             "canonical_hf_repo": manifest["canonical_hf_repo"],
             "canonical_hf_revision": manifest["canonical_hf_revision"],
@@ -95,6 +106,7 @@ def download_model(
             "modelscope_repo": manifest["domestic_modelscope_repo"] if download_source == "domestic" else None,
             "runtime_snapshot_manifest_sha256": snapshot_manifest_sha256(model_id),
             "verified_runtime_files": verified,
+            "verified_artifact_content_sha256": content_sha256,
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
         sidecar_path.write_text(json.dumps(sidecar, indent=2) + "\n", encoding="utf-8")

@@ -24,12 +24,20 @@ def main() -> int:
     parser.add_argument("--system", required=True, choices=list_agent_system_ids())
     parser.add_argument("--artifact-path", required=True, type=Path)
     parser.add_argument("--endpoint", help="When provided, GPU/vLLM executable checks are skipped")
+    parser.add_argument("--allow-unverified-model", action="store_true")
     args = parser.parse_args()
     checks: dict[str, object] = {}
     try:
         system = load_agent_system_spec(args.system)
         checks["config"] = "ok"
-        checks["artifact"] = resolve_artifact(system, args.artifact_path).to_dict()
+        checks["artifact"] = resolve_artifact(
+            system, args.artifact_path,
+            allow_unverified_model=args.allow_unverified_model,
+        ).to_dict()
+        checks["model_provenance_policy"] = (
+            "explicit_unverified_opt_in"
+            if args.allow_unverified_model else "verified_dense_or_canonical_artifact_required"
+        )
         parser_path = resolve_granite_parser(system)
         checks["parser_plugin"] = str(parser_path) if parser_path else "not_required"
         get_agent_runner(system).validate_installation()

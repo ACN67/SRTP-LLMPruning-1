@@ -131,6 +131,8 @@ python3 scripts/setup/prefetch_assets.py --all --root /data/datasets
 python3 scripts/setup/verify_assets.py --root /data/datasets
 ```
 
+正式入口要求 local dense snapshot 具有 schema v3 verified sidecar。已有 schema v2 snapshot 不需要重新下载；直接对原目录重跑 `verify_model_snapshot.py`，验证器会核验现有 runtime files、计算 artifact content SHA256，并在全部检查成功后原地升级 `.srtp_model_source.json`。`--allow-unverified-model` 只用于明确的开发 fixture，绕过状态会写入运行 manifest，不应用于正式实验。
+
 两个当前模型权重合计约 34GB。加入 SWE-Lego-Qwen3-8B 后，三份 dense 模型约 46-50GB。每保存一个完整 pruned checkpoint，通常还会接近一份 dense 模型大小。论文阶段建议准备 1-2TB 存储，并定期清理非 Pareto 点 checkpoint。
 
 ## 实验运行
@@ -175,6 +177,8 @@ python3 scripts/run_direct_benchmark.py \
 ```
 
 正式运行时不要使用 `--limit`。
+
+三个可 resume 的入口都会把 artifact content、task/protocol 与 system/benchmark identity 写入 resume identity；同 run-id 更换 checkpoint 或配置会 fail closed。Direct/Agent 输出应保留原 manifest，不能只复制结果 JSON 后继续 resume。
 
 ## 安全边界
 

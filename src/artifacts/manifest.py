@@ -24,9 +24,17 @@ def sha256_file(path: Path) -> str:
 
 def artifact_inventory(path: Path) -> tuple[list[dict[str, Any]], str]:
     entries = []
-    for item in sorted(entry for entry in path.rglob("*") if entry.is_file() and not entry.is_symlink()):
+    for item in sorted(path.rglob("*")):
+        if item.is_symlink():
+            raise ValueError(f"Canonical artifact directories must not contain symlinks: {item}")
+        if not item.is_file():
+            continue
         relative = item.relative_to(path).as_posix()
-        if relative in {ARTIFACT_MANIFEST_NAME, "recovery_manifest.json"}:
+        if relative in {
+            ARTIFACT_MANIFEST_NAME,
+            "recovery_manifest.json",
+            ".srtp_model_source.json",
+        }:
             continue
         entries.append({"path": relative, "size": item.stat().st_size, "sha256": sha256_file(item)})
     digest = hashlib.sha256(json.dumps(entries, sort_keys=True, separators=(",", ":")).encode()).hexdigest()

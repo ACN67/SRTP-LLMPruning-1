@@ -6,7 +6,7 @@ from .base import (
     MiniSweAgentPlusSpec,
     OpenHandsSpec,
     ProvenanceSpec,
-    ScoreIdentitySpec,
+    UpstreamReferenceResultSpec,
     ServingSpec,
 )
 from .registry import list_agent_system_ids, load_agent_system_spec
@@ -25,7 +25,7 @@ __all__ = [
     "MiniSweAgentPlusSpec",
     "OpenHandsSpec",
     "ProvenanceSpec",
-    "ScoreIdentitySpec",
+    "UpstreamReferenceResultSpec",
     "ServingSpec",
     "RepositoryTask",
     "VLLMServer",

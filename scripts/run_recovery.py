@@ -49,18 +49,27 @@ def main() -> int:
     parser.add_argument("--output-dir", required=True, type=Path)
     parser.add_argument("--device"); parser.add_argument("--device-map"); parser.add_argument("--dtype")
     parser.add_argument("--local-files-only", action="store_true")
+    parser.add_argument("--base-artifact-path", type=Path)
+    parser.add_argument("--allow-unverified-model", action="store_true")
     args = parser.parse_args()
     try:
         output_dir = _validate_output_dir(args.output_dir, args.artifact_path)
         spec = load_model_spec(args.model)
         adapter = get_model_adapter(spec)
-        artifact = resolve_model_artifact(args.artifact_path, spec, adapter)
+        artifact = resolve_model_artifact(
+            args.artifact_path, spec, adapter,
+            require_verified_dense=not args.allow_unverified_model,
+        )
         config = RecoveryConfig.from_mapping(mapping(args.config))
         dataset_raw = mapping(args.dataset_config)
         if args.dataset_path is not None: dataset_raw["path"] = str(args.dataset_path)
         dataset_config = DatasetConfig.from_mapping(dataset_raw)
         options = LoadOptions(dtype=args.dtype or config.dtype, device=args.device, device_map=args.device_map, local_files_only=args.local_files_only)
-        loaded = load_model_artifact(spec, adapter, args.artifact_path, options=options)
+        loaded = load_model_artifact(
+            spec, adapter, args.artifact_path, options=options,
+            require_verified_dense=not args.allow_unverified_model,
+            base_artifact_path=args.base_artifact_path,
+        )
         dataset = prepare_dataset(dataset_config, loaded.tokenizer)
         result = get_recovery_method(args.method).recover(
             loaded=loaded,
@@ -71,6 +80,20 @@ def main() -> int:
             config=config,
             output_dir=output_dir,
             repository_root=ROOT,
+        )
+        manifest_path = Path(result.manifest_path)
+        recovery_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        recovery_manifest["model_provenance_policy"] = (
+            "explicit_unverified_opt_in"
+            if args.allow_unverified_model else "verified_dense_or_canonical_artifact_required"
+        )
+        recovery_manifest["base_artifact_location_override"] = (
+            str(args.base_artifact_path.expanduser().resolve())
+            if args.base_artifact_path is not None else None
+        )
+        manifest_path.write_text(
+            json.dumps(recovery_manifest, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
         )
         print(json.dumps(result.to_dict(), indent=2, ensure_ascii=False)); return 0
     except Exception as error:

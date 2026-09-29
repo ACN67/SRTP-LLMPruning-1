@@ -34,6 +34,12 @@ class AgentResult:
     error_type: str = "none"
     error_message: str = ""
 
+    def __post_init__(self) -> None:
+        if self.status not in {"patch_generated", "generation_failed"}:
+            raise ValueError(
+                "Agent generation status must be 'patch_generated' or 'generation_failed'"
+            )
+
     def to_dict(self) -> dict[str, Any]:
         result = asdict(self)
         result["changed_files"] = list(self.changed_files)

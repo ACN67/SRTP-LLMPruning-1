@@ -5,6 +5,12 @@ undisclosed” now describes only historical leaderboard provenance; it never
 leaves an executable value unset. Dense and pruned artifacts for one system
 use the same effective configuration.
 
+Each public score is stored under `upstream_reference_result` with
+`upstream_reported_resolved_rate` and
+`reproduced_by_this_repository: false`. These values are upstream references,
+not results produced by this repository. Only official evaluator outputs under
+an experiment run directory may be described as repository reproduction results.
+
 ## Exact runtime pins
 
 | Component | Version | Exact revision | Basis |

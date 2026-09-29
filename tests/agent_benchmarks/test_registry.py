@@ -37,7 +37,7 @@ class AgentBenchmarkRegistryTests(unittest.TestCase):
             root = Path(directory); artifact = make_artifact(root / "model")
             for benchmark, row in rows.items():
                 dataset = root / f"{benchmark}.jsonl"; dataset.write_text(json.dumps(row) + "\n")
-                common = [sys.executable, str(ROOT / "scripts/run_agent_benchmark.py"), "--benchmark", benchmark, "--system", "klear_agentforge_8b", "--artifact-path", str(artifact), "--output-root", str(root / "results"), "--run-id", "dry", "--repo-cache-root", str(root / "repos"), "--workspace-root", str(root / "work")]
+                common = [sys.executable, str(ROOT / "scripts/run_agent_benchmark.py"), "--benchmark", benchmark, "--system", "klear_agentforge_8b", "--artifact-path", str(artifact), "--output-root", str(root / "results"), "--run-id", "dry", "--repo-cache-root", str(root / "repos"), "--workspace-root", str(root / "work"), "--allow-unverified-model"]
                 subprocess.run((*common, "--phase", "generate", "--dataset-path", str(dataset), "--offline", "--allow-incomplete-dataset", "--dry-run"), cwd=ROOT, check=True, capture_output=True, text=True)
                 prediction_path = root / "results" / benchmark / "klear_agentforge_8b" / "dry" / "predictions.jsonl"
                 write_predictions(prediction_path, [{"instance_id": row["instance_id"], "model_name_or_path": "klear_agentforge_8b", "model_patch": "diff --git a/a b/a\n"}])

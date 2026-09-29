@@ -37,6 +37,9 @@ class AgentSystemRegistryTests(unittest.TestCase):
             active = {"serving": asdict(spec.serving), "generation": asdict(spec.generation), "agent": asdict(spec.agent)}
             self.assertFalse(incomplete(active))
             self.assertEqual(len(spec.canonical_config_hash), 64)
+            self.assertFalse(spec.upstream_reference_result.reproduced_by_this_repository)
+            self.assertNotIn("score_identity", spec.to_dict())
+            self.assertIn("upstream_reference_result", spec.to_dict())
             hashes.add(spec.canonical_config_hash)
         self.assertEqual(len(hashes), 3)
 

@@ -28,6 +28,7 @@ from src.direct_evaluation.generation import generate_one  # noqa: E402
 from src.analysis import checkpoint_size_bytes  # noqa: E402
 from src.models import LoadOptions, get_model_adapter, list_model_ids, load_model_spec  # noqa: E402
 from src.artifacts import ARTIFACT_MANIFEST_NAME, load_model_artifact, resolve_model_artifact  # noqa: E402
+from src.utils.identity import build_resume_identity, canonical_sha256  # noqa: E402
 
 
 def _safe_component(value: str) -> str:
@@ -42,6 +43,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--benchmark", choices=list_benchmarks(), required=True)
     parser.add_argument("--model", choices=list_model_ids(), required=True)
     parser.add_argument("--artifact-path", type=Path)
+    parser.add_argument("--base-artifact-path", type=Path)
     parser.add_argument("--artifact-kind", choices=("dense", "pruned", "recovered"), default="dense")
     parser.add_argument("--artifact-label", type=_safe_component, default="dense")
     parser.add_argument("--output-root", type=Path, default=Path("/data/results"))
@@ -58,6 +60,7 @@ def _parser() -> argparse.ArgumentParser:
     output.add_argument("--resume", action="store_true")
     output.add_argument("--overwrite", action="store_true")
     parser.add_argument("--timeout", type=float, default=3.0)
+    parser.add_argument("--allow-unverified-model", action="store_true")
     return parser
 
 
@@ -153,7 +156,10 @@ def _artifact_provenance(args: argparse.Namespace) -> dict[str, Any]:
         return {"kind": args.artifact_kind, "label": args.artifact_label, "path": None}
     path = args.artifact_path.resolve()
     spec = load_model_spec(args.model)
-    artifact = resolve_model_artifact(path, spec, get_model_adapter(spec))
+    artifact = resolve_model_artifact(
+        path, spec, get_model_adapter(spec),
+        require_verified_dense=not args.allow_unverified_model,
+    )
     result = {
         **artifact.to_dict(),
         "label": args.artifact_label,
@@ -194,7 +200,10 @@ def _record_key(record: dict[str, Any]) -> tuple[str, int]:
     return str(record["task_id"]), int(record["trial_index"])
 
 
-def _validate_identity(record: dict[str, Any], args: argparse.Namespace, benchmark: Any, profile: Any) -> None:
+def _validate_identity(
+    record: dict[str, Any], args: argparse.Namespace, benchmark: Any, profile: Any,
+    resume_identity: dict[str, Any] | None = None,
+) -> None:
     expected = {
         "benchmark": args.benchmark, "project_model_id": args.model,
         "artifact_kind": args.artifact_kind, "artifact_label": args.artifact_label,
@@ -204,11 +213,25 @@ def _validate_identity(record: dict[str, Any], args: argparse.Namespace, benchma
     for key, value in expected.items():
         if record.get(key) != value:
             raise ValueError(f"Conflicting generation field {key} for {_record_key(record)}")
+    if resume_identity is not None and record.get("resume_identity_sha256") != resume_identity["sha256"]:
+        raise ValueError(
+            f"Cannot resume Direct generation for {_record_key(record)}: "
+            "artifact, task set, or protocol identity changed"
+        )
 
 
 def generate(args: argparse.Namespace, run_dir: Path, benchmark: Any, tasks: list[Any], full_count: int, profile: Any, overridden: bool) -> None:
     if args.artifact_path is None:
         raise ValueError("--artifact-path is required for generation")
+    artifact_provenance = _artifact_provenance(args)
+    resume_identity = build_resume_identity(
+        artifact_content_sha256=artifact_provenance["content_sha256"],
+        benchmark_id=args.benchmark,
+        benchmark_source_revision=benchmark.spec.source_revision,
+        benchmark_metadata_sha256=canonical_sha256(benchmark.spec.metadata),
+        task_id_hash=task_id_hash(tasks),
+        evaluation_profile=profile.to_dict(),
+    )
     expected_keys = {(task.task_id, trial) for task in tasks for trial in range(profile.num_trials)}
     by_key: dict[tuple[str, int], dict[str, Any]] = {}
     for record in (_read_jsonl(run_dir / "generations.jsonl") if args.resume else []):
@@ -217,13 +240,15 @@ def generate(args: argparse.Namespace, run_dir: Path, benchmark: Any, tasks: lis
             raise ValueError(f"Duplicate existing generation for {key}")
         if key not in expected_keys:
             raise ValueError(f"Existing generation {key} is outside this run")
-        _validate_identity(record, args, benchmark, profile)
+        _validate_identity(record, args, benchmark, profile, resume_identity)
         by_key[key] = record
     spec = load_model_spec(args.model)
     loaded = load_model_artifact(
         spec, get_model_adapter(spec), args.artifact_path, kind=args.artifact_kind,
         options=LoadOptions(cache_dir=args.cache_dir, dtype=args.dtype, device=args.device,
                             device_map=args.device_map, local_files_only=args.offline),
+        require_verified_dense=not args.allow_unverified_model,
+        base_artifact_path=args.base_artifact_path,
     )
     ordered_keys = [(task.task_id, trial) for task in tasks for trial in range(profile.num_trials)]
     for task in tasks:
@@ -244,6 +269,7 @@ def generate(args: argparse.Namespace, run_dir: Path, benchmark: Any, tasks: lis
                     "artifact_kind": args.artifact_kind, "artifact_label": args.artifact_label,
                     "prompt_protocol": benchmark.spec.prompt_protocol,
                     "evaluation_profile_id": profile.profile_id,
+                    "resume_identity_sha256": resume_identity["sha256"],
                     **generated, "raw_generation": raw,
                     "processed_generation": benchmark.postprocess_generation(raw),
                     "generation_success": True, "error": None,
@@ -256,6 +282,7 @@ def generate(args: argparse.Namespace, run_dir: Path, benchmark: Any, tasks: lis
                     "artifact_kind": args.artifact_kind, "artifact_label": args.artifact_label,
                     "prompt_protocol": benchmark.spec.prompt_protocol,
                     "evaluation_profile_id": profile.profile_id,
+                    "resume_identity_sha256": resume_identity["sha256"],
                     "prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(),
                     "raw_generation": "", "processed_generation": "",
                     "generation_success": False, "error": f"{type(error).__name__}: {error}",
@@ -263,13 +290,16 @@ def generate(args: argparse.Namespace, run_dir: Path, benchmark: Any, tasks: lis
             by_key[key] = record
             _write_jsonl(run_dir / "generations.jsonl", [by_key[item] for item in ordered_keys if item in by_key])
     manifest = _manifest_base(args, benchmark, tasks, full_count, profile, overridden)
-    artifact = {**_artifact_provenance(args), "structure": dict(loaded.structure)}
+    artifact = {**artifact_provenance, "structure": dict(loaded.structure)}
     successful = [record for record in by_key.values() if record.get("generation_success")]
     measured_wall = sum(float(record.get("generation_wall_time_seconds", 0.0)) for record in successful)
     measured_tokens = sum(int(record.get("generated_tokens", 0)) for record in successful)
-    peaks = [record["peak_cuda_vram_bytes"] for record in successful
-             if record.get("peak_cuda_vram_bytes") is not None]
+    per_device_peaks: dict[str, int] = {}
+    for record in successful:
+        for device, value in (record.get("peak_cuda_vram_per_device_bytes") or {}).items():
+            per_device_peaks[device] = max(per_device_peaks.get(device, 0), int(value))
     manifest.update({"phase": "generation", "effective_evaluation_profile": profile.to_dict(),
+                     "resume_identity": resume_identity,
                      "artifact": artifact,
                      "source_generation_config_sha256": artifact.get("generation_config_sha256"),
                      "runtime": {
@@ -279,7 +309,10 @@ def generate(args: argparse.Namespace, run_dir: Path, benchmark: Any, tasks: lis
                          "generated_tokens_per_second": (
                              measured_tokens / measured_wall if measured_wall > 0 else None
                          ),
-                         "peak_cuda_vram_bytes": max(peaks) if peaks else None,
+                         "peak_cuda_vram_per_device_bytes": per_device_peaks or None,
+                         "peak_cuda_vram_max_device_bytes": (
+                             max(per_device_peaks.values()) if per_device_peaks else None
+                         ),
                          "ttft_seconds": None,
                          "tpot_seconds": None,
                          "serving_metrics_status": "not_measured_without_serving_layer",
@@ -362,7 +395,7 @@ def evaluate(args: argparse.Namespace, run_dir: Path, benchmark: Any, tasks: lis
 
 def _manifest_base(args: argparse.Namespace, benchmark: Any, tasks: list[Any], full_count: int, profile: Any, overridden: bool) -> dict[str, Any]:
     return {
-        "schema_version": 2, "created_at": datetime.now(timezone.utc).isoformat(),
+        "schema_version": 3, "created_at": datetime.now(timezone.utc).isoformat(),
         "project_git_commit": _git_commit(), "source_dirty": _source_dirty(),
         "image_metadata": {"image": os.environ.get("SRTP_IMAGE"), "image_digest": os.environ.get("SRTP_IMAGE_DIGEST")},
         "versions": _versions(), "benchmark": args.benchmark,
@@ -378,6 +411,9 @@ def _manifest_base(args: argparse.Namespace, benchmark: Any, tasks: list[Any], f
         "seed_schedule": {"scope": "trial", "formula": "seed = trial_index", "values": list(range(profile.num_trials))},
         "artifact_kind": args.artifact_kind, "artifact_label": args.artifact_label,
         "pruning_provenance": _pruning_provenance(_artifact_provenance(args)),
+        "model_provenance_policy": (
+            "explicit_unverified_opt_in" if args.allow_unverified_model else "verified_dense_or_canonical_artifact_required"
+        ),
     }
 
 

@@ -77,9 +77,10 @@ agent:
     sources:
       - https://github.com/Kwai-Klear/mini-swe-agent-plus/blob/3dfa5e26831306978ff3cfa2da15b49113ded0e6/src/minisweagent/config/extra/swebench_add_edit_tool.yaml
 
-score_identity:
+upstream_reference_result:
   benchmark_id: swebench_verified
-  reported_resolved_rate: 0.394
+  upstream_reported_resolved_rate: 0.394
+  reproduced_by_this_repository: false
   recipe_status: score_recipe_undisclosed
   undisclosed_fields:
     - score-time serving topology

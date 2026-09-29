@@ -101,6 +101,7 @@ class BenchmarkCliTests(unittest.TestCase):
             max_new_tokens=None, num_trials=None, device=None,
             device_map=None, dtype=None, cache_dir=Path(root), offline=True,
             resume=False, overwrite=False, timeout=1.0,
+            allow_unverified_model=False, base_artifact_path=None,
         )
 
     def test_evaluation_rejects_missing_and_duplicate_tasks(self):
@@ -234,6 +235,52 @@ class BenchmarkCliTests(unittest.TestCase):
             self.module._prepare_directory(path, args)
             self.assertTrue(path.is_dir())
             self.assertEqual(list(path.iterdir()), [])
+
+    def test_resume_rejects_same_run_id_with_different_checkpoint_content(self):
+        task = BenchmarkTask("humaneval", "a", "prompt", {})
+        benchmark = SimpleNamespace(
+            spec=SimpleNamespace(
+                source_revision="a" * 40, metadata={"dataset": "tiny"},
+                prompt_protocol="prompt-v1", code_extraction_protocol="extract-v1",
+            ),
+            build_prompt=lambda _task: "prompt",
+            build_messages=lambda _task: (),
+            postprocess_generation=lambda value: value,
+        )
+        profile = SimpleNamespace(
+            profile_id="profile", profile_version=1, num_trials=1,
+            to_dict=lambda: {"profile_id": "profile", "num_trials": 1},
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            args = self.args(directory)
+            args.phase = "generate"
+            args.model = "klear_agentforge_8b"
+            args.artifact_path = Path(directory) / "checkpoint"
+            run_dir = self.module._run_directory(args)
+            run_dir.mkdir(parents=True)
+            generated = {
+                "raw_generation": "code", "prompt_sha256": "p",
+                "prompt_tokens": 1, "generated_tokens": 1,
+                "generation_wall_time_seconds": 1.0,
+                "generated_tokens_per_second": 1.0,
+                "peak_cuda_vram_per_device_bytes": None,
+                "peak_cuda_vram_max_device_bytes": None,
+            }
+            loaded = SimpleNamespace(model=object(), tokenizer=object(), structure={})
+            with patch.object(
+                self.module, "_artifact_provenance",
+                return_value={"content_sha256": "a" * 64, "lineage": []},
+            ), patch.object(self.module, "load_model_artifact", return_value=loaded), patch.object(
+                self.module, "generate_one", return_value=generated,
+            ):
+                self.module.generate(args, run_dir, benchmark, [task], 1, profile, False)
+            args.resume = True
+            with patch.object(
+                self.module, "_artifact_provenance",
+                return_value={"content_sha256": "b" * 64, "lineage": []},
+            ):
+                with self.assertRaisesRegex(ValueError, "identity changed"):
+                    self.module.generate(args, run_dir, benchmark, [task], 1, profile, False)
 
     def test_timeout_value_changes_evaluator_manifest(self):
         task = BenchmarkTask("humaneval", "a", "", {})

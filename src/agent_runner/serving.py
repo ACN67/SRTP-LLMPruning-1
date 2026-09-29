@@ -47,10 +47,20 @@ class ArtifactServingSpec:
         return asdict(self)
 
 
-def resolve_artifact(system: AgentSystemSpec, artifact_path: Path) -> ArtifactServingSpec:
+def resolve_artifact(
+    system: AgentSystemSpec,
+    artifact_path: Path,
+    *,
+    allow_unverified_model: bool = False,
+) -> ArtifactServingSpec:
     """Adapt the shared canonical artifact to vLLM serving requirements."""
     model_spec = load_model_spec(system.project_model_id)
-    shared = resolve_model_artifact(artifact_path, model_spec, get_model_adapter(model_spec))
+    shared = resolve_model_artifact(
+        artifact_path,
+        model_spec,
+        get_model_adapter(model_spec),
+        require_verified_dense=not allow_unverified_model,
+    )
     if not shared.standalone or shared.representation != "full_checkpoint" or not shared.capabilities.get("vllm_serving", False):
         raise ValueError("Artifact is non-standalone and cannot be served by vLLM; merge it explicitly first")
     config_path = Path(shared.path) / "config.json"

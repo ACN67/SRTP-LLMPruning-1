@@ -215,23 +215,28 @@ AgentSpec = MiniSweAgentPlusSpec | OpenHandsSpec
 
 
 @dataclass(frozen=True)
-class ScoreIdentitySpec:
+class UpstreamReferenceResultSpec:
     benchmark_id: str
-    reported_resolved_rate: float
+    upstream_reported_resolved_rate: float
+    reproduced_by_this_repository: bool
     recipe_status: str
     undisclosed_fields: tuple[str, ...]
     provenance: ProvenanceSpec
 
     @classmethod
-    def from_mapping(cls, raw: Mapping[str, Any]) -> "ScoreIdentitySpec":
+    def from_mapping(cls, raw: Mapping[str, Any]) -> "UpstreamReferenceResultSpec":
         values = dict(raw)
         provenance = ProvenanceSpec.from_mapping(values.pop("provenance"))
         values["undisclosed_fields"] = tuple(str(item) for item in values.get("undisclosed_fields", ()))
         spec = cls(provenance=provenance, **values)
         if spec.recipe_status not in {"official_score_recipe", "score_recipe_undisclosed"}:
             raise ValueError("Invalid score recipe status")
-        if not 0 <= spec.reported_resolved_rate <= 1:
-            raise ValueError("reported_resolved_rate must be in [0, 1]")
+        if not 0 <= spec.upstream_reported_resolved_rate <= 1:
+            raise ValueError("upstream_reported_resolved_rate must be in [0, 1]")
+        if spec.reproduced_by_this_repository:
+            raise ValueError(
+                "Canonical system configs contain upstream references, not repository reproductions"
+            )
         return spec
 
 
@@ -243,7 +248,7 @@ class AgentSystemSpec:
     serving: ServingSpec
     generation: GenerationSpec
     agent: AgentSpec
-    score_identity: ScoreIdentitySpec
+    upstream_reference_result: UpstreamReferenceResultSpec
 
     @classmethod
     def from_mapping(cls, raw: Mapping[str, Any]) -> "AgentSystemSpec":
@@ -258,7 +263,9 @@ class AgentSystemSpec:
             implementation_status=str(raw["implementation_status"]),
             serving=ServingSpec.from_mapping(raw["serving"]),
             generation=GenerationSpec.from_mapping(raw["generation"]), agent=agent,
-            score_identity=ScoreIdentitySpec.from_mapping(raw["score_identity"]),
+            upstream_reference_result=UpstreamReferenceResultSpec.from_mapping(
+                raw["upstream_reference_result"]
+            ),
         )
         if spec.implementation_status != "ready":
             raise ValueError("Executable Agent systems must have implementation_status='ready'")

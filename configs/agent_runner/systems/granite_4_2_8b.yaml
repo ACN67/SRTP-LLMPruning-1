@@ -86,9 +86,10 @@ agent:
     notes:
       - IBM publishes OpenHands compatibility but not the 47.67 score-time agent recipe; this runtime is an explicit project baseline.
 
-score_identity:
+upstream_reference_result:
   benchmark_id: swebench_verified
-  reported_resolved_rate: 0.4767
+  upstream_reported_resolved_rate: 0.4767
+  reproduced_by_this_repository: false
   recipe_status: score_recipe_undisclosed
   undisclosed_fields:
     - IBM 47.67 score-time OpenHands overrides

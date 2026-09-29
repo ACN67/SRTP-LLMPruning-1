@@ -114,7 +114,7 @@ SWE-Lego-Qwen3-8B 如果在结项前完成接入，可以补 dense baseline 和 
 - 10,000 次 task-level paired bootstrap 95% CI；
 - 实际稀疏率、实际删层数、checkpoint 大小；
 - 生成 tokens、wall time、GPU-hours、CPU-hours；
-- 峰值 VRAM/RAM；
+- 每个 CUDA device 的 peak allocated VRAM、各 device peak 的最大值，以及 RAM；不得把 max-device peak 或各卡独立 peak 的加和表述为同一时刻的多卡总峰值；
 - 失败分类：generation error、parse error、timeout、infra error、test failure。
 
 SWE 类 benchmark 建议按 repository 做 cluster bootstrap，避免同一仓库任务过多导致置信区间过窄。

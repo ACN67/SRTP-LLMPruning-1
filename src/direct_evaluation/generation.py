@@ -36,6 +36,27 @@ def _generation_value(model: Any, name: str, default: Any = None) -> Any:
     return default if value is None else value
 
 
+def _cuda_devices(model: Any, torch: Any) -> tuple[Any, ...]:
+    values: list[Any] = []
+    device_map = getattr(model, "hf_device_map", None)
+    if isinstance(device_map, Mapping):
+        values.extend(device_map.values())
+    if not values:
+        candidate = getattr(model, "device", None)
+        if candidate is None:
+            candidate = next(model.parameters()).device
+        values.append(candidate)
+    devices = []
+    for value in values:
+        try:
+            device = torch.device("cuda", value) if isinstance(value, int) else torch.device(value)
+        except (RuntimeError, TypeError):
+            continue
+        if device.type == "cuda" and device not in devices:
+            devices.append(device)
+    return tuple(devices)
+
+
 def generate_one(
     model: Any,
     tokenizer: Any,
@@ -88,28 +109,25 @@ def generate_one(
         for key, value in effective_sampling.items():
             if value is not None:
                 kwargs[key] = value
-    cuda_device = None
+    cuda_devices: tuple[Any, ...] = ()
     try:
         import torch
-        candidate = getattr(model, "device", None)
-        if candidate is None:
-            candidate = next(model.parameters()).device
-        candidate = torch.device(candidate) if candidate is not None else None
-        if candidate is not None and candidate.type == "cuda" and torch.cuda.is_available():
-            cuda_device = candidate
-            torch.cuda.synchronize(cuda_device)
-            torch.cuda.reset_peak_memory_stats(cuda_device)
+        if torch.cuda.is_available():
+            cuda_devices = _cuda_devices(model, torch)
+            for cuda_device in cuda_devices:
+                torch.cuda.synchronize(cuda_device)
+                torch.cuda.reset_peak_memory_stats(cuda_device)
     except (AttributeError, ImportError, StopIteration, RuntimeError, TypeError):
-        cuda_device = None
+        cuda_devices = ()
     started = time.perf_counter()
     output = model.generate(**encoded, **kwargs)
-    if cuda_device is not None:
+    for cuda_device in cuda_devices:
         torch.cuda.synchronize(cuda_device)
     wall_time = time.perf_counter() - started
-    peak_cuda_vram = (
-        int(torch.cuda.max_memory_allocated(cuda_device))
-        if cuda_device is not None else None
-    )
+    peak_cuda_vram_per_device = {
+        str(cuda_device): int(torch.cuda.max_memory_allocated(cuda_device))
+        for cuda_device in cuda_devices
+    }
     prompt_tokens = input_ids.shape[-1]
     generated = output[0, prompt_tokens:]
     raw = tokenizer.decode(generated, skip_special_tokens=True)
@@ -122,7 +140,10 @@ def generate_one(
         "generated_tokens": generated_tokens,
         "generation_wall_time_seconds": wall_time,
         "generated_tokens_per_second": generated_tokens / wall_time,
-        "peak_cuda_vram_bytes": peak_cuda_vram,
+        "peak_cuda_vram_per_device_bytes": peak_cuda_vram_per_device or None,
+        "peak_cuda_vram_max_device_bytes": (
+            max(peak_cuda_vram_per_device.values()) if peak_cuda_vram_per_device else None
+        ),
         "truncated": False,
         "seed": seed,
         "chat_template_used": profile.use_chat_template,

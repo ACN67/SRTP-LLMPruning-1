@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -21,7 +22,7 @@ from transformers import (
 from src.models import LoadOptions, ModelSpec
 from src.artifacts import (
     LineageOperation, ModelArtifact, artifact_inventory, load_model_artifact,
-    write_artifact_manifest,
+    resolve_model_artifact, write_artifact_manifest,
 )
 from src.models.adapters.granite import GraniteAdapter
 from src.models.adapters.qwen3 import Qwen3Adapter
@@ -103,6 +104,73 @@ def write_pruned_artifact(path, spec, adapter, pruner, depth, structure_effect=N
 
 
 class ArtifactLoaderTests(unittest.TestCase):
+    def test_inventory_rejects_symlinks_instead_of_silently_skipping(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "real.bin").write_bytes(b"x")
+            try:
+                os.symlink(root / "real.bin", root / "linked.bin")
+            except OSError as error:
+                self.skipTest(f"symlink creation unavailable: {error}")
+            with self.assertRaisesRegex(ValueError, "must not contain symlinks"):
+                artifact_inventory(root)
+
+    def test_dense_verified_provenance_is_an_execution_boundary(self):
+        model, adapter, spec = tiny_pair("qwen")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            model.save_pretrained(root)
+            with self.assertRaisesRegex(ValueError, "lacks verified provenance"):
+                resolve_model_artifact(
+                    root, spec, adapter, require_verified_dense=True,
+                )
+            unverified = resolve_model_artifact(root, spec, adapter)
+            self.assertEqual(unverified.metadata["manifest_status"], "raw_dense_checkpoint")
+            entries, digest = artifact_inventory(root)
+            runtime_files = [
+                {"path": item["path"], "size": item["size"],
+                 "hash_type": "sha256", "expected_hash": item["sha256"]}
+                for item in entries
+            ]
+            sidecar = {
+                "schema_version": 3,
+                "verification_status": "verified",
+                "project_model_id": spec.project_model_id,
+                "canonical_hf_repo": spec.huggingface_repo_id,
+                "canonical_hf_revision": spec.revision,
+                "runtime_snapshot_manifest_sha256": "m" * 64,
+                "verified_runtime_files": runtime_files,
+                "verified_artifact_content_sha256": digest,
+            }
+            (root / ".srtp_model_source.json").write_text(json.dumps(sidecar))
+            snapshot = {
+                "canonical_hf_repo": spec.huggingface_repo_id,
+                "canonical_hf_revision": spec.revision,
+                "required_runtime_files": runtime_files,
+            }
+            legacy_sidecar = dict(sidecar, schema_version=2)
+            (root / ".srtp_model_source.json").write_text(json.dumps(legacy_sidecar))
+            with patch("src.artifacts.validation.load_snapshot_manifest", return_value=snapshot), patch(
+                "src.artifacts.validation.snapshot_manifest_sha256", return_value="m" * 64
+            ), patch("src.artifacts.validation.artifact_inventory") as inventory_mock, self.assertRaisesRegex(
+                ValueError, "schema_version"
+            ):
+                resolve_model_artifact(root, spec, adapter, require_verified_dense=True)
+            inventory_mock.assert_not_called()
+            (root / ".srtp_model_source.json").write_text(json.dumps(sidecar))
+            with patch("src.artifacts.validation.load_snapshot_manifest", return_value=snapshot), patch(
+                "src.artifacts.validation.snapshot_manifest_sha256", return_value="m" * 64
+            ):
+                artifact = resolve_model_artifact(
+                    root, spec, adapter, require_verified_dense=True,
+                )
+            self.assertEqual(artifact.metadata["manifest_status"], "verified_dense_snapshot")
+            (root / "tamper.bin").write_bytes(b"changed")
+            with patch("src.artifacts.validation.load_snapshot_manifest", return_value=snapshot), patch(
+                "src.artifacts.validation.snapshot_manifest_sha256", return_value="m" * 64
+            ), self.assertRaisesRegex(ValueError, "verified provenance mismatch"):
+                resolve_model_artifact(root, spec, adapter, require_verified_dense=True)
+
     def _load(self, spec, adapter, path, kind="pruned"):
         with patch(
             "src.models.loader._runtime_imports",

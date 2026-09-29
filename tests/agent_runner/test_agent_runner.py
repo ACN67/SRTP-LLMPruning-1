@@ -1,4 +1,5 @@
 import json
+import importlib.util
 import socket
 import subprocess
 import sys
@@ -7,6 +8,7 @@ import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 from src.agent_runner import AgentResult, RepositoryTask, VLLMServer, get_agent_runner, load_agent_system_spec, resolve_artifact
@@ -99,10 +101,39 @@ class OpenAIHandler(BaseHTTPRequestHandler):
 
 
 class AgentRunnerTests(unittest.TestCase):
+    def test_single_agent_resume_and_overwrite_are_mutually_exclusive(self):
+        path = ROOT / "scripts" / "run_agent_system.py"
+        spec = importlib.util.spec_from_file_location("run_agent_system_cli_test", path)
+        module = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+        with self.assertRaises(SystemExit):
+            module._parser().parse_args([
+                "--system", "klear_agentforge_8b", "--artifact-path", "model",
+                "--repo-path", "repo", "--task-file", "task.md",
+                "--output-dir", "out", "--resume", "--overwrite",
+            ])
+        with self.assertRaisesRegex(SystemExit, "allow-dirty"):
+            with patch.object(sys, "argv", [
+                str(path), "--system", "klear_agentforge_8b", "--artifact-path", "model",
+                "--repo-path", "repo", "--task-file", "task.md", "--output-dir", "out",
+                "--resume", "--allow-dirty",
+            ]):
+                module.main()
+        with tempfile.TemporaryDirectory() as tmp, self.assertRaisesRegex(
+            SystemExit, "run_manifest.json is missing"
+        ):
+            with patch.object(sys, "argv", [
+                str(path), "--system", "klear_agentforge_8b", "--artifact-path", "model",
+                "--repo-path", "repo", "--task-file", "task.md",
+                "--output-dir", str(Path(tmp) / "out"), "--resume",
+            ]):
+                module.main()
+
     def test_artifact_dense_pruned_and_granite_parser(self):
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
-            dense = resolve_artifact(load_agent_system_spec("klear_agentforge_8b"), make_artifact(base / "dense"))
+            dense = resolve_artifact(load_agent_system_spec("klear_agentforge_8b"), make_artifact(base / "dense"), allow_unverified_model=True)
             self.assertEqual(dense.kind, "dense")
             for method in ("magnitude", "wanda", "sparsegpt"):
                 pruned = resolve_artifact(load_agent_system_spec("klear_agentforge_8b"), make_artifact(base / method, pruning={"pruner": method}))
@@ -135,7 +166,7 @@ class AgentRunnerTests(unittest.TestCase):
     def test_exact_command_and_override(self):
         with tempfile.TemporaryDirectory() as tmp:
             system = load_agent_system_spec("klear_agentforge_8b")
-            item = resolve_artifact(system, make_artifact(Path(tmp) / "model"))
+            item = resolve_artifact(system, make_artifact(Path(tmp) / "model"), allow_unverified_model=True)
             serving = system.serving.with_overrides({"port": 8123, "tensor_parallel_size": 2})
             command = build_vllm_command(serving, item)
             self.assertEqual(command[1:3], ("serve", item.path))
@@ -149,7 +180,9 @@ class AgentRunnerTests(unittest.TestCase):
 
     def server(self, tmp, process, query, timeout=.03):
         system = load_agent_system_spec("klear_agentforge_8b")
-        item = resolve_artifact(system, make_artifact(Path(tmp) / "model"))
+        item = resolve_artifact(
+            system, make_artifact(Path(tmp) / "model"), allow_unverified_model=True
+        )
         return VLLMServer(system, item, Path(tmp) / "out", startup_timeout=timeout, poll_interval=.001, terminate_timeout=.001, popen_factory=lambda *a, **k: process, models_query=query)
 
     def test_lifecycle_cleanup_and_forced_kill(self):
@@ -181,8 +214,10 @@ class AgentRunnerTests(unittest.TestCase):
             self.assertIn("+b", patch)
             self.assertIn("+new", patch)
             self.assertEqual(names, ("a.txt", "new.txt"))
-        required = dict(system_id="s", project_model_id="m", artifact_provenance={}, task_id="t", status="success", started_at="a", ended_at="b", runtime_seconds=1, framework="f", framework_version="1", framework_revision="0"*40, effective_agent_config={}, endpoint="e", serving_manifest_path="s", trajectory_path="t", stdout_path="o", stderr_path="e", patch_path="p", patch_sha256="h", changed_files=("a",), repository_before={}, repository_after={})
+        required = dict(system_id="s", project_model_id="m", artifact_provenance={}, task_id="t", status="patch_generated", started_at="a", ended_at="b", runtime_seconds=1, framework="f", framework_version="1", framework_revision="0"*40, effective_agent_config={}, endpoint="e", serving_manifest_path="s", trajectory_path="t", stdout_path="o", stderr_path="e", patch_path="p", patch_sha256="h", changed_files=("a",), repository_before={}, repository_after={})
         self.assertEqual(AgentResult(**required).to_dict()["changed_files"], ["a"])
+        with self.assertRaisesRegex(ValueError, "patch_generated"):
+            AgentResult(**{**required, "status": "success"})
 
     def test_three_cli_dry_runs(self):
         models = {"klear_agentforge_8b": ("qwen3", 36), "swe_lego_qwen3_8b": ("qwen3", 36), "granite_4_2_8b": ("granite", 40)}
@@ -193,10 +228,81 @@ class AgentRunnerTests(unittest.TestCase):
             task = base / "task.md"; task.write_text("change a")
             for name, (kind, depth) in models.items():
                 model = make_artifact(base / name, kind, depth); output = base / (name + "-out")
-                subprocess.run((sys.executable, str(ROOT / "scripts/run_agent_system.py"), "--system", name, "--artifact-path", str(model), "--repo-path", str(repo), "--task-file", str(task), "--output-dir", str(output), "--dry-run"), cwd=ROOT, check=True, capture_output=True, text=True)
+                subprocess.run((sys.executable, str(ROOT / "scripts/run_agent_system.py"), "--system", name, "--artifact-path", str(model), "--repo-path", str(repo), "--task-file", str(task), "--output-dir", str(output), "--dry-run", "--allow-unverified-model"), cwd=ROOT, check=True, capture_output=True, text=True)
                 manifest = json.loads((output / "run_manifest.json").read_text())
                 self.assertEqual(manifest["result"]["status"], "dry_run_validated")
                 self.assertNotIn("api_key", manifest["effective_serving_config"])
+                self.assertEqual(manifest["model_provenance_policy"], "explicit_unverified_opt_in")
+
+    def test_single_agent_resume_rejects_changed_checkpoint(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            repo = base / "repo"
+            subprocess.run(("git", "init", "-q", str(repo)), check=True)
+            subprocess.run(("git", "-C", str(repo), "config", "user.email", "a@b.c"), check=True)
+            subprocess.run(("git", "-C", str(repo), "config", "user.name", "T"), check=True)
+            (repo / "a").write_text("a")
+            subprocess.run(("git", "-C", str(repo), "add", "."), check=True)
+            subprocess.run(("git", "-C", str(repo), "commit", "-qm", "base"), check=True)
+            task = base / "task.md"
+            task.write_text("change a")
+            model = make_artifact(base / "model")
+            output = base / "out"
+            command = [
+                sys.executable, str(ROOT / "scripts/run_agent_system.py"),
+                "--system", "klear_agentforge_8b", "--artifact-path", str(model),
+                "--repo-path", str(repo), "--task-file", str(task),
+                "--output-dir", str(output), "--dry-run", "--allow-unverified-model",
+            ]
+            subprocess.run(command, cwd=ROOT, check=True, capture_output=True, text=True)
+            (model / "model.safetensors").write_bytes(b"different")
+            resumed = subprocess.run(
+                [*command, "--resume"], cwd=ROOT, check=False,
+                capture_output=True, text=True,
+            )
+            self.assertEqual(resumed.returncode, 2)
+            self.assertIn("identity changed", resumed.stderr)
+
+    def test_batch_dry_run_granite_parser_and_resume_identity(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            dataset = base / "tasks.json"
+            dataset.write_text(json.dumps([{
+                "instance_id": "owner__repo-1", "repo": "owner/repo",
+                "base_commit": "a" * 40, "problem_statement": "fix it",
+            }]))
+            commands = {}
+            for system_id, model_type, depth in (
+                ("granite_4_2_8b", "granite", 40),
+                ("klear_agentforge_8b", "qwen3", 36),
+            ):
+                model = make_artifact(base / system_id, model_type, depth)
+                output_root = base / f"results-{system_id}"
+                command = [
+                    sys.executable, str(ROOT / "scripts/run_agent_benchmark.py"),
+                    "--phase", "generate", "--benchmark", "swebench_verified",
+                    "--system", system_id, "--artifact-path", str(model),
+                    "--output-root", str(output_root), "--run-id", "same",
+                    "--repo-cache-root", str(base / "cache"),
+                    "--workspace-root", str(base / "work"),
+                    "--dataset-path", str(dataset), "--offline",
+                    "--allow-incomplete-dataset", "--dry-run",
+                    "--allow-unverified-model",
+                ]
+                subprocess.run(command, cwd=ROOT, check=True, capture_output=True, text=True)
+                manifest_path = output_root / "swebench_verified" / system_id / "same" / "run_manifest.json"
+                manifest = json.loads(manifest_path.read_text())
+                commands[system_id] = manifest["vllm_command"]
+                if system_id == "klear_agentforge_8b":
+                    (model / "model.safetensors").write_bytes(b"different")
+                    resumed = subprocess.run(
+                        [*command, "--resume"], cwd=ROOT, check=False,
+                        capture_output=True, text=True,
+                    )
+                    self.assertNotEqual(resumed.returncode, 0)
+                    self.assertIn("identity changed", resumed.stderr)
+            self.assertIn("--reasoning-parser-plugin", commands["granite_4_2_8b"])
+            self.assertNotIn("--reasoning-parser-plugin", commands["klear_agentforge_8b"])
 
     @unittest.skipUnless((ROOT / ".venv-miniswe/bin/python").is_file(), "mini-swe runtime not installed")
     def test_real_miniswe_agent_loop_against_fake_openai(self):
@@ -211,10 +317,10 @@ class AgentRunnerTests(unittest.TestCase):
                 subprocess.run(("git", "-C", str(repo), "config", "user.email", "a@b.c"), check=True); subprocess.run(("git", "-C", str(repo), "config", "user.name", "T"), check=True)
                 (repo / "README.md").write_text("base\n"); subprocess.run(("git", "-C", str(repo), "add", "."), check=True); subprocess.run(("git", "-C", str(repo), "commit", "-qm", "base"), check=True)
                 system = load_agent_system_spec("klear_agentforge_8b")
-                item = resolve_artifact(system, make_artifact(base / "model"))
+                item = resolve_artifact(system, make_artifact(base / "model"), allow_unverified_model=True)
                 with VLLMServer(system, item, base / "server", endpoint=endpoint, startup_timeout=2) as server:
                     result = get_agent_runner(system).run(RepositoryTask("real-loop", repo, "Create result.txt containing fixed"), server.endpoint, base / "out", timeout=60, artifact_provenance=item.to_dict())
-                self.assertEqual(result.status, "success", (base / "out/agent.stderr.log").read_text())
+                self.assertEqual(result.status, "patch_generated", (base / "out/agent.stderr.log").read_text())
                 self.assertIn("result.txt", result.changed_files)
                 self.assertTrue((base / "out/trajectory.json").is_file())
                 self.assertEqual(OpenAIHandler.calls, [("/v1/chat/completions", "srtp-klear-agentforge-8b")] * 2)

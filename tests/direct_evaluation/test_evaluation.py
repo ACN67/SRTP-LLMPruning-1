@@ -17,7 +17,7 @@ from transformers import Qwen3Config, Qwen3ForCausalLM
 
 from src.direct_evaluation import BenchmarkSpec, BenchmarkTask, list_benchmarks, load_evaluation_profile
 from src.direct_evaluation.benchmarks import HumanEvalBenchmark, LiveCodeBenchBenchmark, MBPPBenchmark
-from src.direct_evaluation.generation import generate_one
+from src.direct_evaluation.generation import _cuda_devices, generate_one
 from src.direct_evaluation.lcb_protocol import (
     FORMAT_WITHOUT_STARTER, SYSTEM_MESSAGE_GENERIC, chat_messages, decode_test_cases,
     extract_lcb_code, generic_question_prompt, load_verified_v6,
@@ -194,6 +194,13 @@ class RecordingModel:
 
 
 class TinyGenerationTests(unittest.TestCase):
+    def test_multi_gpu_device_map_accepts_integer_devices_and_deduplicates(self):
+        model = SimpleNamespace(hf_device_map={"a": 0, "b": 1, "c": 0, "d": "cpu"})
+        self.assertEqual(
+            tuple(str(device) for device in _cuda_devices(model, torch)),
+            ("cuda:0", "cuda:1"),
+        )
+
     def test_profile_generation_preserves_model_eos_and_records_seed(self):
         model = Qwen3ForCausalLM(Qwen3Config(vocab_size=16, hidden_size=8, intermediate_size=16,
             num_hidden_layers=1, num_attention_heads=2, num_key_value_heads=1,
@@ -206,7 +213,8 @@ class TinyGenerationTests(unittest.TestCase):
         self.assertEqual(result["seed"], 7)
         self.assertEqual(result["prompt_tokens"], 3)
         self.assertGreater(result["generation_wall_time_seconds"], 0)
-        self.assertEqual(result["peak_cuda_vram_bytes"], None)
+        self.assertEqual(result["peak_cuda_vram_per_device_bytes"], None)
+        self.assertEqual(result["peak_cuda_vram_max_device_bytes"], None)
         self.assertAlmostEqual(
             result["generated_tokens_per_second"],
             result["generated_tokens"] / result["generation_wall_time_seconds"],

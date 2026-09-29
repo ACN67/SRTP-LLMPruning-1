@@ -1,6 +1,7 @@
 """Real PEFT LoRA and recovery dataset integration tests on tiny local models."""
 
 import json
+import shutil
 import tempfile
 import unittest
 from dataclasses import replace
@@ -137,6 +138,27 @@ class RecoveryTests(unittest.TestCase):
                     out / "adapter",
                     options=LoadOptions(dtype="float32"),
                 )
+
+    def test_adapter_and_base_can_move_and_relocate_by_hash(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            base = root / "base"
+            base.mkdir()
+            adapter, spec, artifact = save_artifact(base, "qwen")
+            result, out = self.run_recovery(base, adapter, spec, artifact)
+            self.assertEqual(result.status, "success")
+            moved_base = root / "moved" / "base"
+            moved_adapter = root / "moved" / "adapter"
+            moved_base.parent.mkdir()
+            shutil.move(str(base), moved_base)
+            shutil.move(str(out / "adapter"), moved_adapter)
+            loaded = load_model_artifact(
+                spec, adapter, moved_adapter,
+                options=LoadOptions(dtype="float32"),
+                base_artifact_path=moved_base,
+            )
+            ids = torch.tensor([[3, 4]])
+            self.assertEqual(loaded.model(input_ids=ids).logits.shape[:2], ids.shape)
 
     def test_gradient_checkpointing_path_updates_lora_parameters(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -46,7 +46,7 @@ class SWTbenchVerifiedAdapter:
         return RepositoryTask(instance.instance_id, repo_path, instance.problem_statement, instance.base_commit)
 
     def build_prediction(self, result: AgentResult) -> dict[str, Any]:
-        patch = Path(result.patch_path).read_text(encoding="utf-8") if result.status == "success" else ""
+        patch = Path(result.patch_path).read_text(encoding="utf-8") if result.status == "patch_generated" else ""
         full_output = ""
         trajectory = Path(result.trajectory_path)
         if trajectory.is_file():
