@@ -20,11 +20,11 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src.agent_runtime import (  # noqa: E402
+from src.agent_runner import (  # noqa: E402
     RepositoryTask, VLLMServer, get_agent_runner, list_agent_system_ids,
     load_agent_system_spec, resolve_artifact,
 )
-from src.agent_runtime.serving import (  # noqa: E402
+from src.agent_runner.serving import (  # noqa: E402
     ServingStartupError, build_vllm_command, resolve_granite_parser,
 )
 

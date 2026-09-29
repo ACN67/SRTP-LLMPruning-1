@@ -15,8 +15,8 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src.agent_runtime import get_agent_runner, list_agent_system_ids, load_agent_system_spec, resolve_artifact  # noqa: E402
-from src.agent_runtime.serving import port_is_available, resolve_granite_parser  # noqa: E402
+from src.agent_runner import get_agent_runner, list_agent_system_ids, load_agent_system_spec, resolve_artifact  # noqa: E402
+from src.agent_runner.serving import port_is_available, resolve_granite_parser  # noqa: E402
 
 
 def main() -> int:
@@ -33,7 +33,7 @@ def main() -> int:
         parser_path = resolve_granite_parser(system)
         checks["parser_plugin"] = str(parser_path) if parser_path else "not_required"
         get_agent_runner(system).validate_installation()
-        checks["agent_runtime"] = "ok"
+        checks["agent_runner"] = "ok"
         if args.endpoint:
             checks["serving"] = "external_endpoint"
         else:

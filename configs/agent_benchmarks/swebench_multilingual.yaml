@@ -1,15 +1,15 @@
-benchmark_id: swebench_verified
+benchmark_id: swebench_multilingual
 implementation_status: software_ready
-task_type: repository_issue_repair
+task_type: multilingual_repository_issue_repair
 primary_metric: resolved_rate
 execution_mode: repair
-result_parser_id: swebench_v5_report_schema_2
+result_parser_id: swebench_v5_report_schema_2_language_aggregate
 dataset:
-  repo_id: SWE-bench/SWE-bench_Verified
-  revision: 78f471bf655a3137b2e8a75af1501690ec009ec3
+  repo_id: SWE-bench/SWE-bench_Multilingual
+  revision: 846e647b9f33c0b51b739d005d13d85493c9af09
   split: test
-  expected_task_count: 500
-  local_path: .agent_benchmarks/datasets/swebench_verified/test.json
+  expected_task_count: 300
+  local_path: .agent_benchmarks/datasets/swebench_multilingual/test.json
 harness:
   repository: https://github.com/SWE-bench/SWE-bench
   release: v5.0.1
@@ -25,12 +25,14 @@ prompt:
   template_sha256: a9349a568b0b243d8f3f65210d42aed460fd5619a20d1f13727a6f903a59635e
   provenance_status: official_dataset_field
 metadata:
-  task_repo: https://github.com/SWE-bench/swe-bench-tasks
-  task_repo_revision: 3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d
+  task_repo: https://github.com/SWE-bench/swe-bench-multilingual-tasks
+  task_repo_revision: 6e08cbcd763c869abd7aae4bcb9e1b3991180777
+  expected_repo_count: 41
+  expected_languages: [C, C++, Go, Java, JavaScript, TypeScript, PHP, Ruby, Rust]
   prediction_schema: swebench_v5_standard
   full_evaluation_requires: x86_64_docker
 provenance:
   status: official_executable_pinned
   sources:
     - https://github.com/SWE-bench/SWE-bench/releases/tag/v5.0.1
-    - https://www.swebench.com/SWE-bench/guides/datasets/
+    - https://www.swebench.com/multilingual.html

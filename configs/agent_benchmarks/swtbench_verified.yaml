@@ -1,0 +1,55 @@
+benchmark_id: swtbench_verified
+implementation_status: software_ready
+task_type: repository_test_generation
+primary_metric: success_rate
+execution_mode: unit_test
+result_parser_id: swtbench_1_3_0_unit_test
+dataset:
+  repo_id: eth-sri/SWT-bench_Verified_bm25_27k_zsp
+  revision: 70675e4c5e43093a3e5e60cf6128f9757471ab40
+  split: test
+  expected_task_count: 433
+  local_path: .agent_benchmarks/datasets/swtbench_verified/test.json
+harness:
+  repository: https://github.com/logic-star-ai/swt-bench
+  release: 1.3.0
+  revision: 443e03b385089bf8bd787fb8b79fb9a49b7fb2a0
+  package_version: 1.0.1
+  runtime_python: .venv-swtbench/bin/python
+  source_checkout: .agent_benchmarks/swt-bench
+  evaluator_entry: src.main
+prompt:
+  protocol_id: swtbench_verified_zsp_unit_test_v1
+  source: https://github.com/logic-star-ai/swt-bench/tree/1.3.0
+  template: "Your task is to add or modify tests that reproduce the issue below.\nDo not fix the product bug. Produce a focused test patch that fails on the buggy checkout and passes after the official fix.\n\nIssue:\n{problem_statement}\n"
+  template_sha256: 16a8281b75060360579e460c6c9b8bf0fb07492752fcd8ce5fae0be456014768
+  provenance_status: project_template_based_on_official_zeroshotplus_unit_test
+metadata:
+  variant: verified_zeroshotplus
+  protocol: project_raw_swt_harness_protocol
+  evaluation_dataset:
+    repo_id: SWE-bench/SWE-bench_Verified
+    revision: 78f471bf655a3137b2e8a75af1501690ec009ec3
+    split: test
+    source_expected_task_count: 500
+    expected_task_count: 433
+    source_local_path: .agent_benchmarks/datasets/swebench_verified/test.json
+    local_path: .agent_benchmarks/datasets/swtbench_verified_eval/test.json
+    filter_path: dataset/filter_cases_verified.txt
+    filter_expected_count: 67
+    filter_sha256: 726776a13721dc01e4fbeee5cb7f3c3068649e2b32f8be5282e498658aacf58b
+    output_sha256: aed655aa72d2d7316817bf1b131b8dd3c2a12db163c1624576108c073f30b559
+  patch_types: [vanilla]
+  prediction_schema: swtbench_standard
+  generation_task_field: problem_statement
+  excluded_prompt_fields: [text, hits, patch, test_patch]
+  openhands_patch_filtering: not_applied_raw_agent_patch
+  full_evaluation_requires: x86_64_docker_120gb_16gb_ram_8_cpu
+provenance:
+  status: official_executable_pinned
+  sources:
+    - https://github.com/logic-star-ai/swt-bench/tree/1.3.0
+    - https://huggingface.co/datasets/eth-sri/SWT-bench_Verified_bm25_27k_zsp
+    - https://huggingface.co/datasets/SWE-bench/SWE-bench_Verified
+    - https://github.com/OpenHands/benchmarks/issues/344
+    - https://github.com/OpenHands/benchmarks/issues/718

@@ -214,3 +214,56 @@ python3 scripts/setup/preflight.py --all --json
 5. 关机停止 GPU 计费。
 
 AutoDL 本地数据盘不应作为唯一副本。长时间关机、欠费、主机下架或本地盘故障都可能导致数据不可恢复。
+
+## Agent benchmark 官方运行环境
+
+Agent runner 与 benchmark evaluator 使用不同环境：现有 `.venv` 保留 pruning/recovery/direct evaluation；SWE-bench v5 使用 `.venv-swebench`，SWT-Bench 使用 `.venv-swtbench`。上游 checkout 位于被 Git 忽略的 `.agent_benchmarks/`。
+
+SWT-Bench 的数据角色不可互换：generation 从 pinned ZeroShotPlus 433-row snapshot 读取 `problem_statement`；evaluation 从 pinned SWE-bench Verified 500-row source 和 pinned SWT 67-ID filter 派生 433-row snapshot。setup 会验证两边 ID 集合相等并记录 source/filter/output SHA256。默认 `project_raw_swt_harness_protocol` 直接评价 raw Agent patch，不执行 OpenHands wrapper 的 setup/config filtering 或 test-only stripping，因此不宣称与其当前 leaderboard recipe 数值严格可比。
+
+```bash
+python3 scripts/setup/setup_agent_benchmarks.py
+
+python3 scripts/setup/agent_benchmark_preflight.py \
+  --benchmark swebench_verified \
+  --task-repo /data/agent_benchmarks/swe-bench-tasks \
+  --check-runtime
+python3 scripts/setup/agent_benchmark_preflight.py \
+  --benchmark swtbench_verified --check-runtime
+```
+
+建议持久化目录：
+
+```text
+/data/agent_benchmarks/
+├── repos/       # read-only-ish bare mirrors/cache
+├── worktrees/   # one writable detached worktree per instance
+├── datasets/    # exact-revision local snapshots
+├── task-repos/  # SWE-bench v5 task trees
+└── results/     # predictions, evaluator logs, manifests
+```
+
+SWE-bench v5 可使用 registry image，也可通过 `--task-repo` 使用 pinned task repository。正式 evaluator 需要 Docker daemon 和 x86_64；SWT-Bench 上游建议至少 120 GB 可用存储、16 GB RAM、8 CPU cores，并建议 worker 数不超过 CPU 的约 75%（且不超过 24）。运行前预留 Docker image/cache 空间，避免与模型 checkpoint 共用紧张的系统盘。
+
+官方单题 gold smoke（`INSTANCE` 必须换成对应数据集中的真实 id）：
+
+```bash
+# SWE-bench Verified v5
+.venv-swebench/bin/swebench eval .agent_benchmarks/datasets/swebench_verified/test.json --gold \
+  --instance INSTANCE --run-id gold-verified-1 --workers 1 \
+  --task-repo /data/agent_benchmarks/task-repos/swe-bench-tasks
+
+# SWE-bench Multilingual v5
+.venv-swebench/bin/swebench eval .agent_benchmarks/datasets/swebench_multilingual/test.json --gold \
+  --instance INSTANCE --run-id gold-multilingual-1 --workers 1 \
+  --task-repo /data/agent_benchmarks/task-repos/swe-bench-multilingual-tasks
+
+# SWT-Bench Verified, unit-test mode
+(cd .agent_benchmarks/swt-bench && ../../.venv-swtbench/bin/python -m src.main \
+  --dataset_name ../../.agent_benchmarks/datasets/swtbench_verified_eval/test.json \
+  --predictions_path gold \
+  --instance_ids INSTANCE --max_workers 1 --run_id gold-swt-verified-1 \
+  --exec_mode unit_test --patch_types vanilla)
+```
+
+项目 wrapper 的 `--phase evaluate --dry-run` 会写出 exact command 而不启动 Docker；generation 和 evaluation 可使用同一个 `run-id` 独立重跑。软件 dry-run 只验证接口，不能替代上述官方 gold smoke。

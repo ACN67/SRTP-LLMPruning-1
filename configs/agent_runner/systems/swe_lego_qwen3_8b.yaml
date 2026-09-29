@@ -53,7 +53,7 @@ agent:
   upstream_repo: https://github.com/All-Hands-AI/OpenHands
   upstream_revision: 9ee704a25a331d0d2eb9a8e87a4dcff1d948855b
   runtime_python: .venv-openhands/bin/python
-  source_checkout: .agent_runtime/OpenHands-0.53.0
+  source_checkout: .agent_runner/OpenHands-0.53.0
   agent_class: CodeActAgent
   max_iterations: 100
   runs: 1

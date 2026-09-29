@@ -45,7 +45,7 @@ class AgentRunner:
     ) -> tuple[str, ...]:
         agent = self.system.agent
         bridge = (
-            REPOSITORY_ROOT / "scripts" / "agent_runtime" /
+            REPOSITORY_ROOT / "scripts" / "agent_runner" /
             ("miniswe_bridge.py" if isinstance(agent, MiniSweAgentPlusSpec) else "openhands_bridge.py")
         )
         command = [
@@ -84,7 +84,7 @@ class AgentRunner:
         python = _resolved(agent.runtime_python)
         source = _resolved(agent.source_checkout)
         if not python.is_file():
-            raise FileNotFoundError(f"Agent runtime Python is missing: {python}")
+            raise FileNotFoundError(f"Agent runner Python is missing: {python}")
         if not source.is_dir():
             raise FileNotFoundError(f"Pinned Agent source checkout is missing: {source}")
         revision = subprocess.run(

@@ -8,7 +8,7 @@ from pathlib import Path
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
-from src.agent_runtime import list_agent_system_ids, load_agent_system_spec
+from src.agent_runner import list_agent_system_ids, load_agent_system_spec
 from src.direct_evaluation.registry import list_benchmarks
 from src.models import list_model_ids
 
@@ -55,7 +55,7 @@ class AgentSystemRegistryTests(unittest.TestCase):
 
     def test_swebench_has_no_system_runtime_parameters(self):
         raw = yaml.safe_load((ROOT / "configs/agent_benchmarks/swebench_verified.yaml").read_text())
-        self.assertEqual(raw["expected_task_count"], 500)
+        self.assertEqual(raw["dataset"]["expected_task_count"], 500)
         rendered = json.dumps(raw)
         for forbidden in ("max_iterations", "step_limit", "temperature", "tensor_parallel_size"):
             self.assertNotIn(forbidden, rendered)

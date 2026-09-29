@@ -61,11 +61,11 @@ SRTP 阶段只承诺完成以下固定任务集：
 
 ## 论文阶段 Benchmark
 
-论文主基准：
+论文主基准（软件已接入，正式服务器结果 pending）：
 
 - **SWE-bench Verified**：主 repository-level 修复评估，输出 patch，指标为 resolved rate。
 - **SWE-bench Multilingual**：多语言 repository-level 软件工程能力，独立配置与 adapter 文件，但可复用公共 helper。
-- **SWT-Bench Verified**：测试生成能力，必须独立于 SWE-bench patch 修复指标报告。
+- **SWT-Bench Verified**：测试生成能力，必须独立于 SWE-bench patch 修复指标报告。generation 使用 ZSP 433-row inference snapshot，evaluation 使用 SWE-bench Verified 500-row source 减去 pinned 67-ID filter 后的 433-row original-semantics snapshot；默认 `project_raw_swt_harness_protocol` 不应用 OpenHands wrapper 的额外 patch postprocessing。
 
 补充基准：
 
@@ -128,9 +128,10 @@ SWE 类 benchmark 建议按 repository 做 cluster bootstrap，避免同一仓�
 - `src/pruning/`：Magnitude、Wanda、SparseGPT、SLEB、TaBP；
 - `src/recovery/`：独立 post-pruning/post-training recovery，目前实现 PEFT LoRA；
 - `src/direct_evaluation/`：HumanEval、MBPP、LiveCodeBench；
-- `src/agent_runtime/`：vLLM lifecycle 与 model-specific canonical Agent；
+- `src/agent_runner/`：vLLM lifecycle 与 model-specific canonical Agent；
+- `src/agent_benchmarks/`：benchmark dataset/repository/prediction、official evaluator wrapper 与 benchmark result；
 - `src/analysis/`：结果统计与效率分析。
 
-对应顶层入口为 `run_pruning.py`、`run_recovery.py`、`run_direct_benchmark.py`、`run_agent_system.py` 与 `analyze_results.py`。架构测试禁止 models/artifacts/pruning/recovery/direct_evaluation/agent_runtime 之间出现反向依赖。
+对应顶层入口为 `run_pruning.py`、`run_recovery.py`、`run_direct_benchmark.py`、`run_agent_system.py`、`run_agent_benchmark.py` 与 `analyze_results.py`。架构测试固定依赖方向，并禁止 `agent_runner -> agent_benchmarks`。
 
-下一阶段独立新增 `src/agent_benchmarks/` 与 `scripts/run_agent_benchmark.py`。SWE-bench Verified、SWE-bench Multilingual、SWT-Bench Verified 分别拥有独立 adapter Python 文件、配置、测试和 provenance 文档；相似实现只能下沉到公共 helper，不把多个正式 benchmark 合并到同一 adapter 文件。Terminal-Bench、BFCL 等后续 benchmark 允许使用 native harness，并通过同一 benchmark extension contract 接入，不修改更深层的模型、Artifact、Pruning、Recovery 或 Agent runtime。
+SWE-bench Verified、SWE-bench Multilingual（300 tasks / 41 repositories / 9 languages）、SWT-Bench Verified 现已分别拥有独立 adapter、配置、测试和 provenance 文档，并共享最小 repository/prediction/harness helper。状态为 software-ready 与 official-interface-validated；正式 Docker gold smoke、8B generation 和全量分数仍 pending。Terminal-Bench、BFCL 等后续 benchmark 可通过同一 extension contract 接入，不修改更深层的模型、Artifact、Pruning、Recovery 或 Agent runner。

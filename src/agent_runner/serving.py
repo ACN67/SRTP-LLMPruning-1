@@ -23,7 +23,7 @@ from .base import AgentSystemSpec, ServingSpec
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-GRANITE_PARSER = REPOSITORY_ROOT / "third_party" / "agent_runtime" / "granite_thinking_parser.py"
+GRANITE_PARSER = REPOSITORY_ROOT / "third_party" / "agent_runner" / "granite_thinking_parser.py"
 
 
 def _utc_now() -> str:

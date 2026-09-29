@@ -4,7 +4,7 @@
 
 - **SRTP 结项阶段**：完成 Klear-AgentForge-8B、Granite-4.2-8B 上的剪枝复现，并在 HumanEval、MBPP、LiveCodeBench fine-grained v6 上做固定协议评测。
 - **论文非 Agent 阶段**：接入 SWE-Lego-Qwen3-8B、TaBP 与 dense/pruned 成对分析。
-- **Agent 运行层**：三套 canonical Agent + vLLM 系统已可独立执行本地 Git repository task；后续仅接入 SWE-bench/SWT-Bench task provisioning、evaluator 与 scheduling。
+- **Agent 研究层**：三套 canonical Agent + vLLM runner，以及 SWE-bench Verified、SWE-bench Multilingual、SWT-Bench Verified 的软件接入与官方 evaluator 接口。
 
 本仓库目前不声明任何正式 pass@1、resolved rate 或 leaderboard 结果。真实 8B 权重、GPU 剪枝、完整 benchmark 和论文级 agent 评测仍需要服务器验证。
 
@@ -17,8 +17,8 @@
 | Recovery | PEFT LoRA：adapter-only、显式 merge、稀疏 merge safety | 最终 recovery corpus / protocol 待实验设计确定 |
 | 分析 | task-level paired bootstrap、retention/delta、Pareto helper | repo-cluster bootstrap、serving TTFT/TPOT |
 | SRTP benchmark | HumanEval original 164、MBPP original test 500、LiveCodeBench fine-grained v6 175 | 无 |
-| Agent runtime | vLLM 生命周期、mini-swe-agent-plus、OpenHands、canonical full-checkpoint artifact、patch/trajectory/manifest | 真实 8B GPU 环境 smoke |
-| Agent benchmark | 无 | SWE-bench Verified、SWE-bench Multilingual、SWT-Bench Verified；后续补充 Terminal-Bench、BFCL |
+| Agent runner | vLLM 生命周期、mini-swe-agent-plus、OpenHands、canonical full-checkpoint artifact、patch/trajectory/manifest | 真实 8B GPU 环境 smoke |
+| Agent benchmark | SWE-bench Verified（500）、Multilingual（300）、SWT-Bench Verified（433）的 adapter、repo provisioning、prediction、official harness wrapper | 真实 Docker/8B 全量结果；Terminal-Bench、BFCL |
 
 TaBP 在 registry 中仍是一个 pruning family；后续 empirical study 会将 TaBP-SSN 与 TaBP-DDF 作为两个实验条件，而不是两个顶层算法 family。
 
@@ -26,12 +26,12 @@ TaBP 在 registry 中仍是一个 pruning family；后续 empirical study 会将
 
 ## Agent + vLLM
 
-三套系统都由 `configs/agent_runtime/systems/` 中的完整配置启动。重依赖分别安装到隔离环境，不改变现有 `.venv`：
+三套系统都由 `configs/agent_runner/systems/` 中的完整配置启动。重依赖分别安装到隔离环境，不改变现有 `.venv`：
 
 ```bash
-.venv/bin/python scripts/setup/setup_agent_runtime.py --component vllm
-.venv/bin/python scripts/setup/setup_agent_runtime.py --component mini_swe_agent_plus
-.venv/bin/python scripts/setup/setup_agent_runtime.py --component openhands
+.venv/bin/python scripts/setup/setup_agent_runner.py --component vllm
+.venv/bin/python scripts/setup/setup_agent_runner.py --component mini_swe_agent_plus
+.venv/bin/python scripts/setup/setup_agent_runner.py --component openhands
 ```
 
 可通过 `--index-url https://pypi.tuna.tsinghua.edu.cn/simple` 显式选择国内 PyPI 镜像。启动前检查：
@@ -68,7 +68,7 @@ TaBP 在 registry 中仍是一个 pruning family；后续 empirical study 会将
 → software/GPU/path preflight
 → pruning 产生 canonical artifact
 → recovery（可选）产生新的 artifact
-→ Direct benchmark 或 Agent runtime
+→ Direct Evaluation 或 Agent Runner → Agent Benchmarks
 → analysis / 归档 manifest、结果和环境身份
 ```
 
@@ -80,7 +80,8 @@ TaBP 在 registry 中仍是一个 pruning family；后续 empirical study 会将
 - benchmark 数据、prompt、extraction：`configs/direct_benchmarks/`
 - model × benchmark generation 参数：`configs/direct_evaluation/`
 - Recovery 参数与数据配置：`configs/recovery/`
-- Agent system/runtime 配置：`configs/agent_runtime/`
+- Agent runner 与 system 配置：`configs/agent_runner/`
+- Agent benchmark 协议配置：`configs/agent_benchmarks/`
 - canonical artifact 实现：`src/artifacts/`
 - 上游 revision、license 与方法说明：`third_party/`
 
@@ -193,7 +194,7 @@ python3 scripts/run_recovery.py \
   --device cuda
 ```
 
-输出始终包含 PEFT adapter 和 `recovery_manifest.json`。只有显式选择 `standard_merge` 时才生成 standalone merged checkpoint。对 Magnitude/Wanda/SparseGPT 这类 weight-sparse artifact，普通 LoRA merge 默认被拒绝；必须显式允许潜在 sparsity 改变，并记录 merge 前后零值率。SLEB/TaBP reduced-depth artifact 可以显式 merge，但必须保持层数不变。Direct evaluation 可加载 PEFT overlay；vLLM Agent runtime 只接受 standalone full checkpoint，因此 adapter-only artifact 会 fail-fast。
+输出始终包含 PEFT adapter 和 `recovery_manifest.json`。只有显式选择 `standard_merge` 时才生成 standalone merged checkpoint。对 Magnitude/Wanda/SparseGPT 这类 weight-sparse artifact，普通 LoRA merge 默认被拒绝；必须显式允许潜在 sparsity 改变，并记录 merge 前后零值率。SLEB/TaBP reduced-depth artifact 可以显式 merge，但必须保持层数不变。Direct evaluation 可加载 PEFT overlay；vLLM Agent runner 只接受 standalone full checkpoint，因此 adapter-only artifact 会 fail-fast。
 
 ## 代码生成评测
 
@@ -236,10 +237,32 @@ manifest 会保存 task identity、prompt/extraction protocol、effective genera
 
 ```text
 Direct: artifact -> Transformers -> HumanEval / MBPP / LiveCodeBench
-Agent:  artifact -> vLLM -> model-specific canonical Agent -> repository sandbox -> SWE / SWT
+Agent:  artifact -> Agent Runner -> Agent Benchmarks -> official evaluator
 ```
 
-`configs/agent_runtime/systems/` 与 `src/agent_runtime/` 提供三模型 canonical system identity、vLLM 生命周期、mini-swe-agent-plus/OpenHands runner、repository task、patch/trajectory 与 run manifest。Agent benchmark adapter/evaluator 尚未实现；下一阶段将独立建立 `src/agent_benchmarks/`，不修改 Agent runtime。Direct benchmark 不 import OpenHands、mini-swe-agent-plus 或 vLLM。
+`agent_runner` 只负责把一个已准备好的 repository task 跑起来：vLLM、mini-swe-agent-plus/OpenHands、trajectory 与 patch。`agent_benchmarks` 负责 benchmark 数据、独立 worktree、prediction、官方 evaluator 与聚合结果；依赖方向固定为 `agent_benchmarks -> agent_runner`。Direct benchmark 不 import OpenHands、mini-swe-agent-plus 或 vLLM。
+
+Agent benchmark 的 generation/evaluation 可独立重跑：
+
+```bash
+python3 scripts/setup/setup_agent_benchmarks.py --benchmark swebench_verified
+
+python3 scripts/run_agent_benchmark.py \
+  --phase generate --benchmark swebench_verified \
+  --system klear_agentforge_8b --artifact-path /data/models/klear_agentforge_8b \
+  --output-root /data/agent_benchmarks/results --run-id pilot \
+  --repo-cache-root /data/agent_benchmarks/repos \
+  --workspace-root /data/agent_benchmarks/worktrees --limit 1
+
+python3 scripts/run_agent_benchmark.py \
+  --phase evaluate --benchmark swebench_verified \
+  --system klear_agentforge_8b --artifact-path /data/models/klear_agentforge_8b \
+  --output-root /data/agent_benchmarks/results --run-id pilot \
+  --repo-cache-root /data/agent_benchmarks/repos \
+  --workspace-root /data/agent_benchmarks/worktrees --evaluator-workers 1
+```
+
+setup 会把 exact-revision dataset 固化为 `.agent_benchmarks/datasets/.../test.json` 并写入带 SHA256 的 sidecar；正式 evaluator 使用该本地 snapshot，避免 alias 漂移。SWE-bench Multilingual 的固定口径是 300 tasks / 41 repositories / 9 languages。SWT-Bench generation 使用 433-row ZSP snapshot；evaluation 则从 exact SWE-bench Verified 500-row source 按 pinned SWT filter 删除 67 题，生成 ID 集合相同的 433-row original-SWE-semantics snapshot。SWE-bench 使用官方 `v5.0.1` CLI；SWT-Bench 使用独立的 `1.3.0` tag evaluator。SWT 默认协议名为 `project_raw_swt_harness_protocol`，保留 raw Agent patch，不等同于当前 OpenHands leaderboard 的额外 patch postprocessing。软件测试、schema 与 exact command 验证不等于 Docker evaluator 已运行，也不产生正式 resolved/success rate。
 
 评测会额外写出包含所有任务结果的 `outcomes.jsonl`。可对 identity 完全一致的 dense/pruned run 做 task-level paired bootstrap：
 
@@ -255,7 +278,7 @@ Direct generation runtime 只记录 `model.generate` 的墙钟时间、prompt/ge
 
 SWE-bench、SWT-Bench、BFCL、Terminal-Bench 不应直接扩进当前 `run_direct_benchmark.py`。它们需要独立 harness、容器隔离、任务 revision lock、成本记录和更复杂的指标。
 
-当前尚未实现 SWE/SWT benchmark harness、repo-cluster bootstrap 或 benchmark-scale Docker task provisioning；这些能力将在独立 Agent benchmark 层实现，不能由 Direct benchmark 或 Agent runtime 隐式替代。
+当前已实现 SWE/SWT official harness 薄封装与 per-instance worktree provisioning；尚未执行 benchmark-scale Docker evaluation，也尚未实现 repo-cluster bootstrap。
 
 ## 安全说明
 
@@ -270,4 +293,4 @@ SWE-bench、SWT-Bench、BFCL、Terminal-Bench 不应直接扩进当前 `run_dire
 3. Prefetch 并验证真实 benchmark/calibration assets。
 4. 验证五类 pruned artifact，尤其 SLEB/TaBP reduced checkpoint。
 5. 先运行 `--limit 2`，再根据资源执行 full benchmark。
-6. 对 LoRA/merged artifact 做服务器级 smoke；随后接入 SWE-bench Verified、SWE-bench Multilingual、SWT-Bench Verified。
+6. 对 LoRA/merged artifact 做服务器级 smoke；再按部署文档运行三套 Agent benchmark 的官方 gold smoke 和正式 8B 实验。

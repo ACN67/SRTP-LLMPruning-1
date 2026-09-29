@@ -55,7 +55,7 @@ agent:
   upstream_repo: https://github.com/Kwai-Klear/mini-swe-agent-plus
   upstream_revision: 3dfa5e26831306978ff3cfa2da15b49113ded0e6
   runtime_python: .venv-miniswe/bin/python
-  source_checkout: .agent_runtime/mini-swe-agent-plus
+  source_checkout: .agent_runner/mini-swe-agent-plus
   config_path: src/minisweagent/config/extra/swebench_add_edit_tool.yaml
   runs: 1
   worker_count: 1

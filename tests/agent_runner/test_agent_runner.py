@@ -9,11 +9,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-from src.agent_runtime import AgentResult, RepositoryTask, VLLMServer, get_agent_runner, load_agent_system_spec, resolve_artifact
+from src.agent_runner import AgentResult, RepositoryTask, VLLMServer, get_agent_runner, load_agent_system_spec, resolve_artifact
 from src.artifacts import LineageOperation, ModelArtifact, artifact_inventory, write_artifact_manifest
 from src.models import load_model_spec
-from src.agent_runtime.serving import ServingStartupError, build_vllm_command, port_is_available, resolve_granite_parser
-from src.agent_runtime.task import extract_patch
+from src.agent_runner.serving import ServingStartupError, build_vllm_command, port_is_available, resolve_granite_parser
+from src.agent_runner.task import extract_patch
 
 
 def make_artifact(root, model_type="qwen3", depth=36, pruning=None):
@@ -98,7 +98,7 @@ class OpenAIHandler(BaseHTTPRequestHandler):
         self._send({"id": "chatcmpl-test", "object": "chat.completion", "created": 1, "model": request["model"], "choices": [{"index": 0, "message": {"role": "assistant", "content": content}, "finish_reason": "stop"}], "usage": {"prompt_tokens": 10, "completion_tokens": 10, "total_tokens": 20}})
 
 
-class AgentRuntimeTests(unittest.TestCase):
+class AgentRunnerTests(unittest.TestCase):
     def test_artifact_dense_pruned_and_granite_parser(self):
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)

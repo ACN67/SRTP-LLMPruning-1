@@ -11,12 +11,13 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 SRC_ROOT = REPOSITORY_ROOT / "src"
 
 FORBIDDEN = {
-    "models": {"artifacts", "pruning", "recovery", "direct_evaluation", "agent_runtime", "agent_benchmarks"},
-    "artifacts": {"pruning", "recovery", "direct_evaluation", "agent_runtime", "agent_benchmarks"},
-    "pruning": {"recovery", "direct_evaluation", "agent_runtime", "agent_benchmarks"},
-    "recovery": {"pruning", "direct_evaluation", "agent_runtime", "agent_benchmarks"},
-    "direct_evaluation": {"pruning", "recovery", "agent_runtime", "agent_benchmarks"},
-    "agent_runtime": {"pruning", "recovery", "direct_evaluation", "agent_benchmarks"},
+    "models": {"artifacts", "pruning", "recovery", "direct_evaluation", "agent_runner", "agent_benchmarks"},
+    "artifacts": {"pruning", "recovery", "direct_evaluation", "agent_runner", "agent_benchmarks"},
+    "pruning": {"recovery", "direct_evaluation", "agent_runner", "agent_benchmarks"},
+    "recovery": {"pruning", "direct_evaluation", "agent_runner", "agent_benchmarks"},
+    "direct_evaluation": {"pruning", "recovery", "agent_runner", "agent_benchmarks"},
+    "agent_runner": {"pruning", "recovery", "direct_evaluation", "agent_benchmarks"},
+    "agent_benchmarks": {"pruning", "recovery"},
 }
 
 
@@ -44,6 +45,18 @@ def _targets(node: ast.AST, path: Path) -> tuple[str, ...]:
     return (".".join(base + suffix),)
 
 
+def forbidden_targets(source_package: str, source: str, path: Path) -> list[str]:
+    tree = ast.parse(source, filename=str(path))
+    forbidden = FORBIDDEN.get(source_package, set())
+    result = []
+    for node in ast.walk(tree):
+        for target in _targets(node, path):
+            parts = target.split(".")
+            if target.startswith("src.") and len(parts) >= 2 and parts[1] in forbidden:
+                result.append(target)
+    return result
+
+
 class ArchitectureDependencyTests(unittest.TestCase):
     def test_forbidden_reverse_dependencies_are_absent(self) -> None:
         violations: list[str] = []
@@ -54,21 +67,32 @@ class ArchitectureDependencyTests(unittest.TestCase):
             forbidden = FORBIDDEN.get(source_package, set())
             if not forbidden:
                 continue
-            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-            for node in ast.walk(tree):
-                for target in _targets(node, path):
-                    if not target.startswith("src."):
-                        continue
-                    parts = target.split(".")
-                    if len(parts) < 2:
-                        continue
-                    target_package = parts[1]
-                    if target_package in forbidden:
-                        violations.append(
-                            f"{path.relative_to(REPOSITORY_ROOT)} imports {target}; "
-                            f"{source_package} must not depend on {target_package}"
-                        )
+            for target in forbidden_targets(source_package, path.read_text(encoding="utf-8"), path):
+                target_package = target.split(".")[1]
+                violations.append(
+                    f"{path.relative_to(REPOSITORY_ROOT)} imports {target}; "
+                    f"{source_package} must not depend on {target_package}"
+                )
         self.assertEqual(violations, [], "\n" + "\n".join(violations))
+
+    def test_agent_runner_to_agent_benchmarks_violation_is_detected(self) -> None:
+        path = SRC_ROOT / "agent_runner" / "synthetic.py"
+        self.assertEqual(
+            forbidden_targets("agent_runner", "from src.agent_benchmarks import get_agent_benchmark\n", path),
+            ["src.agent_benchmarks"],
+        )
+
+    def test_removed_legacy_agent_package_has_no_imports_or_paths(self) -> None:
+        old_name = "agent" + "_runtime"
+        offenders = []
+        for root in (REPOSITORY_ROOT / name for name in ("src", "scripts", "tests", "configs", "third_party")):
+            for path in root.rglob("*"):
+                if old_name in path.as_posix():
+                    offenders.append(str(path.relative_to(REPOSITORY_ROOT)))
+                if path.is_file() and path.suffix in {".py", ".yaml", ".md"}:
+                    if old_name in path.read_text(encoding="utf-8", errors="ignore"):
+                        offenders.append(str(path.relative_to(REPOSITORY_ROOT)))
+        self.assertEqual(offenders, [])
 
 
 if __name__ == "__main__":

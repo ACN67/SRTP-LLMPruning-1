@@ -1,6 +1,6 @@
 # Agent and vLLM runtime audit
 
-All active runtime fields are fixed in `configs/agent_runtime/systems/`. “Score recipe
+All active runtime fields are fixed in `configs/agent_runner/systems/`. “Score recipe
 undisclosed” now describes only historical leaderboard provenance; it never
 leaves an executable value unset. Dense and pruned artifacts for one system
 use the same effective configuration.
@@ -13,7 +13,7 @@ use the same effective configuration.
 | mini-swe-agent-plus | 1.14.4 | `3dfa5e26831306978ff3cfa2da15b49113ded0e6` | Klear official Agent implementation and config |
 | OpenHands | 0.53.0 | `9ee704a25a331d0d2eb9a8e87a4dcff1d948855b` | SWE-Lego's pinned public recipe |
 
-The pins are machine-readable in `configs/agent_runtime/runtime_pins.yaml`.
+The pins are machine-readable in `configs/agent_runner/runtime_pins.yaml`.
 Each framework and vLLM is installed in its own venv. The adapters invoke
 upstream framework classes; they do not reimplement either Agent loop.
 
@@ -56,7 +56,7 @@ IBM's official model card fixes BF16, 131,072 context,
 `granite_thinking_parser`, `qwen3_coder`, automatic tool choice, temperature
 1, top-p 0.95, sampling enabled, thinking enabled, 8,192 output tokens and
 history-thinking truncation. The official parser is vendored with provenance
-at `third_party/agent_runtime/granite_thinking_parser.py`, validated before spawn,
+at `third_party/agent_runner/granite_thinking_parser.py`, validated before spawn,
 and passed to vLLM by an absolute plugin path for both dense and pruned models.
 
 IBM publishes OpenHands compatibility and a 47.67 score but not the complete

@@ -152,7 +152,7 @@ activemq-data/
 .envrc
 .venv
 .venv-*/
-.agent_runtime/
+.agent_runner/
 agent_runs/
 env/
 venv/
@@ -276,6 +276,9 @@ models/*
 # Runtime data and generated artifacts
 data/
 /artifacts/
+/.agent_benchmarks/
+/.venv-swebench/
+/.venv-swtbench/
 wandb/
 mlruns/
 *.log

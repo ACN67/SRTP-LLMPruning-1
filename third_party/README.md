@@ -1,6 +1,6 @@
 # 上游来源、审计与许可证
 
-本目录按职责记录固定上游来源、revision/tag、license、项目适配以及仍待真实硬件验证的边界。正式实验中的模型、剪枝、Recovery、Direct benchmark 与 Agent runtime 都应能从这里追溯到对应官方来源；benchmark 数据来源与 evaluator code license 分开记录。
+本目录按职责记录固定上游来源、revision/tag、license、项目适配以及仍待真实硬件验证的边界。正式实验中的模型、剪枝、Recovery、Direct benchmark、Agent runner 与 Agent benchmark 都应能从这里追溯到对应官方来源；benchmark 数据来源与 evaluator code license 分开记录。
 
 ## 目录
 
@@ -8,7 +8,8 @@
 - `pruning/`：Magnitude、Wanda、SparseGPT、SLEB、TaBP。
 - `recovery/`：PEFT LoRA 及后续 recovery 方法。
 - `direct_benchmarks/`：HumanEval、MBPP、LiveCodeBench。
-- `agent_runtime/`：vLLM / Agent system provenance 与 Granite reasoning parser。
+- `agent_runner/`：vLLM / Agent system provenance 与 Granite reasoning parser。
+- `agent_benchmarks/`：SWE-bench v5 与 SWT-Bench 的 dataset、evaluator、schema 和 protocol pin。
 - `licenses/`：vendored evaluator/source license notices。
 
 ## 模型与架构结论
@@ -39,5 +40,10 @@
 - [MBPP](direct_benchmarks/mbpp.md)
 - [LiveCodeBench](direct_benchmarks/livecodebench.md)
 
-### Agent runtime
-- [Canonical Agent systems](agent_runtime/agent_systems.md)
+### Agent runner
+- [Canonical Agent systems](agent_runner/agent_systems.md)
+
+### Agent benchmarks
+- [SWE-bench Verified](agent_benchmarks/swebench_verified.md)
+- [SWE-bench Multilingual](agent_benchmarks/swebench_multilingual.md)
+- [SWT-Bench Verified](agent_benchmarks/swtbench_verified.md)

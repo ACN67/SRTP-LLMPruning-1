@@ -12,7 +12,7 @@ import yaml
 
 
 ROOT = Path(__file__).resolve().parents[2]
-PINS = yaml.safe_load((ROOT / "configs/agent_runtime/runtime_pins.yaml").read_text(encoding="utf-8"))
+PINS = yaml.safe_load((ROOT / "configs/agent_runner/runtime_pins.yaml").read_text(encoding="utf-8"))
 
 
 def run(*args: str) -> None:
@@ -50,7 +50,7 @@ def install(component: str, index_url: str | None) -> None:
         run(str(python_in(venv)), "-m", "pip", "install", *pip_extra, f"vllm=={PINS['vllm']['version']}")
         return
     checkout_name = "mini-swe-agent-plus" if component == "mini_swe_agent_plus" else "OpenHands-0.53.0"
-    checkout = ROOT / ".agent_runtime" / checkout_name
+    checkout = ROOT / ".agent_runner" / checkout_name
     ensure_checkout(component, checkout)
     venv_name = ".venv-miniswe" if component == "mini_swe_agent_plus" else ".venv-openhands"
     venv = ROOT / venv_name

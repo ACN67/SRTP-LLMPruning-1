@@ -11,7 +11,7 @@ from src.models import list_model_ids
 from .base import AgentSystemSpec
 
 
-DEFAULT_AGENT_SYSTEM_DIR = Path(__file__).resolve().parents[2] / "configs" / "agent_runtime" / "systems"
+DEFAULT_AGENT_SYSTEM_DIR = Path(__file__).resolve().parents[2] / "configs" / "agent_runner" / "systems"
 
 
 def list_agent_system_ids(

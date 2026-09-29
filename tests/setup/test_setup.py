@@ -267,6 +267,68 @@ class CalibrationAssetTests(unittest.TestCase):
 
 
 class SetupAndPreflightTests(unittest.TestCase):
+    def test_swt_evaluation_derivation_is_deterministic_and_idempotent(self):
+        module = load_script("setup_agent_benchmarks_test", "scripts/setup/setup_agent_benchmarks.py")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            checkout = root / "checkout"
+            (checkout / "dataset").mkdir(parents=True)
+            filter_file = checkout / "dataset/filter_cases_verified.txt"
+            filter_file.write_text("drop\n", encoding="utf-8")
+            source_rows = [
+                {"instance_id": "keep", "patch": "fix", "test_patch": "test"},
+                {"instance_id": "drop", "patch": "fix2", "test_patch": "test2"},
+            ]
+            inference_rows = [{"instance_id": "keep", "patch": "<patch>\ntest\n</patch>", "test_patch": "fix"}]
+            source = root / "datasets/source/test.json"
+            inference = root / "datasets/inference/test.json"
+            for path, rows, identity in (
+                (source, source_rows, {"repo_id": "SWE-bench/SWE-bench_Verified", "revision": "a" * 40, "split": "test", "row_count": 2}),
+                (inference, inference_rows, {"repo_id": "eth-sri/SWT", "revision": "b" * 40, "split": "test", "row_count": 1}),
+            ):
+                path.parent.mkdir(parents=True)
+                payload = json.dumps(rows, ensure_ascii=False, sort_keys=True).encode()
+                path.write_bytes(payload)
+                path.with_suffix(".json.manifest.json").write_text(json.dumps({**identity, "sha256": hashlib.sha256(payload).hexdigest()}))
+            output_payload = json.dumps([source_rows[0]], ensure_ascii=False, sort_keys=True).encode()
+            config = {
+                "dataset": {"repo_id": "eth-sri/SWT", "revision": "b" * 40, "split": "test"},
+                "harness": {"revision": "c" * 40},
+                "metadata": {"evaluation_dataset": {
+                    "repo_id": "SWE-bench/SWE-bench_Verified", "revision": "a" * 40, "split": "test",
+                    "source_expected_task_count": 2, "expected_task_count": 1,
+                    "source_local_path": "datasets/source/test.json", "local_path": "datasets/eval/test.json",
+                    "filter_path": "dataset/filter_cases_verified.txt", "filter_expected_count": 1,
+                    "filter_sha256": hashlib.sha256(filter_file.read_bytes()).hexdigest(),
+                    "output_sha256": hashlib.sha256(output_payload).hexdigest(),
+                }},
+            }
+            with patch.object(module, "ROOT", root):
+                module._setup_swt_evaluation(config, checkout, root / "unused-python", inference)
+                output = root / "datasets/eval/test.json"
+                first = output.read_bytes()
+                first_manifest = output.with_suffix(".json.manifest.json").read_bytes()
+                module._setup_swt_evaluation(config, checkout, root / "unused-python", inference)
+            self.assertEqual(output.read_bytes(), first)
+            self.assertEqual(output.with_suffix(".json.manifest.json").read_bytes(), first_manifest)
+            manifest = json.loads(first_manifest)
+            self.assertEqual((manifest["source_row_count"], manifest["filter_count"], manifest["row_count"]), (2, 1, 1))
+            self.assertEqual(manifest["sha256"], hashlib.sha256(output_payload).hexdigest())
+
+    def test_agent_benchmark_preflight_snapshot_validation_rejects_tampering(self):
+        module = load_script("agent_benchmark_preflight_test", "scripts/setup/agent_benchmark_preflight.py")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory, "test.json")
+            path.write_text('[{"instance_id":"a"}]', encoding="utf-8")
+            identity = {"repo_id": "example/data", "revision": "a" * 40, "split": "test", "row_count": 1}
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+            path.with_suffix(".json.manifest.json").write_text(json.dumps({**identity, "sha256": digest}))
+            rows, manifest = module._validate_snapshot(path, identity)
+            self.assertEqual((rows[0]["instance_id"], manifest["sha256"]), ("a", digest))
+            path.write_text("[]", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "manifest mismatch"):
+                module._validate_snapshot(path, identity)
+
     def test_docker_and_dependency_baseline_is_pinned(self):
         dockerfile = (ROOT / "Dockerfile").read_text()
         requirements = set((ROOT / "requirements.txt").read_text().splitlines())
