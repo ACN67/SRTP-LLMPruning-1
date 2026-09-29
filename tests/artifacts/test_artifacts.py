@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -104,6 +105,60 @@ def write_pruned_artifact(path, spec, adapter, pruner, depth, structure_effect=N
 
 
 class ArtifactLoaderTests(unittest.TestCase):
+    def test_canonical_manifest_lineage_tamper_is_rejected(self):
+        model, adapter, spec = tiny_pair("qwen")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            model.save_pretrained(root)
+            write_pruned_artifact(root, spec, adapter, "magnitude", 3)
+            manifest_path = root / "artifact_manifest.json"
+            raw = json.loads(manifest_path.read_text(encoding="utf-8"))
+            self.assertEqual(raw["schema_version"], 2)
+            raw["artifact"]["lineage"][0]["method"] = "wanda"
+            manifest_path.write_text(json.dumps(raw), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "provenance hash mismatch"):
+                resolve_model_artifact(root, spec, adapter)
+
+    def test_canonical_artifact_relocation_preserves_manifest_identity(self):
+        model, adapter, spec = tiny_pair("qwen")
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            original = parent / "original"
+            original.mkdir()
+            model.save_pretrained(original)
+            write_pruned_artifact(original, spec, adapter, "magnitude", 3)
+            manifest_path = original / "artifact_manifest.json"
+            reformatted = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest_path.write_text(
+                json.dumps(reformatted, sort_keys=True, separators=(",", ":")),
+                encoding="utf-8",
+            )
+            before = resolve_model_artifact(original, spec, adapter)
+            moved = parent / "moved"
+            shutil.move(str(original), moved)
+            after = resolve_model_artifact(moved, spec, adapter)
+            self.assertEqual(after.path, str(moved.resolve()))
+            self.assertEqual(
+                after.manifest_provenance_sha256,
+                before.manifest_provenance_sha256,
+            )
+            (moved / "model.safetensors").write_bytes(b"changed")
+            with self.assertRaisesRegex(ValueError, "content hash"):
+                resolve_model_artifact(moved, spec, adapter)
+
+    def test_legacy_canonical_manifest_fails_with_migration_message(self):
+        model, adapter, spec = tiny_pair("qwen")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            model.save_pretrained(root)
+            write_pruned_artifact(root, spec, adapter, "magnitude", 3)
+            manifest_path = root / "artifact_manifest.json"
+            raw = json.loads(manifest_path.read_text(encoding="utf-8"))
+            raw["schema_version"] = 1
+            manifest_path.write_text(json.dumps(raw), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "lack manifest provenance protection"):
+                resolve_model_artifact(root, spec, adapter)
+
     def test_inventory_rejects_symlinks_instead_of_silently_skipping(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

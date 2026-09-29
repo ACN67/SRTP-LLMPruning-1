@@ -28,7 +28,7 @@ from src.models import (  # noqa: E402
     load_dense_model,
     load_model_spec,
 )
-from src.artifacts import LineageOperation, ModelArtifact, artifact_inventory, resolve_model_artifact, write_artifact_manifest  # noqa: E402
+from src.artifacts import LineageOperation, ModelArtifact, artifact_inventory, read_artifact_manifest, resolve_model_artifact, write_artifact_manifest  # noqa: E402
 from src.analysis import checkpoint_size_bytes  # noqa: E402
 from src.direct_evaluation import load_evaluation_profile  # noqa: E402
 from src.pruning.calibration_assets import load_local_c4, load_local_wikitext2  # noqa: E402
@@ -775,6 +775,7 @@ def execute_experiment(args: argparse.Namespace) -> dict[str, Any]:
         },
     )
     write_artifact_manifest(output_dir, artifact)
+    artifact = read_artifact_manifest(output_dir)
     return {"schema_version": 1, "status": "completed", "artifact": artifact.to_dict()}
 
 

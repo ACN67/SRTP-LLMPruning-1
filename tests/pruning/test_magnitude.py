@@ -250,10 +250,12 @@ class CliExecuteFlowTests(unittest.TestCase):
             self.assertEqual(manifest["status"], "completed")
             self.assertEqual(manifest["artifact"]["lineage"][0]["method"], "magnitude")
             self.assertEqual(manifest["artifact"]["lineage"][0]["parameters"]["pruner"], "magnitude")
+            self.assertEqual(len(manifest["artifact"]["manifest_provenance_sha256"]), 64)
             self.assertTrue(Path(directory, "model.ok").exists())
             self.assertTrue(Path(directory, "tokenizer.ok").exists())
             persisted = json.loads(Path(directory, "artifact_manifest.json").read_text())
-            self.assertEqual(persisted["schema_version"], 1)
+            self.assertEqual(persisted["schema_version"], 2)
+            self.assertEqual(len(persisted["artifact_provenance_sha256"]), 64)
             self.assertEqual(persisted["artifact"]["lineage"][0]["method"], "magnitude")
 
 

@@ -22,7 +22,7 @@ if str(ROOT) not in sys.path:
 
 from src.agent_runner import (  # noqa: E402
     RepositoryTask, VLLMServer, get_agent_runner, list_agent_system_ids,
-    load_agent_system_spec, resolve_artifact,
+    load_agent_system_spec, normalize_endpoint, resolve_artifact, serving_provenance,
 )
 from src.agent_runner.serving import (  # noqa: E402
     ServingStartupError, build_vllm_command, resolve_granite_parser,
@@ -71,6 +71,10 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--base-commit")
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--endpoint", help="Reuse an existing OpenAI-compatible vLLM endpoint")
+    parser.add_argument(
+        "--allow-unverified-external-endpoint", action="store_true",
+        help="Explicitly accept that an external endpoint's checkpoint digest is unverifiable",
+    )
     parser.add_argument("--keep-server", action="store_true", help="Leave a successfully managed server running")
     parser.add_argument("--host")
     parser.add_argument("--port", type=int)
@@ -102,6 +106,13 @@ def _sanitized_serving(serving: object) -> dict[str, Any]:
 
 def main() -> int:
     args = _parser().parse_args()
+    if args.endpoint and not args.allow_unverified_external_endpoint:
+        raise SystemExit(
+            "--endpoint requires --allow-unverified-external-endpoint because the "
+            "remote checkpoint identity cannot be verified"
+        )
+    if args.allow_unverified_external_endpoint and not args.endpoint:
+        raise SystemExit("--allow-unverified-external-endpoint requires --endpoint")
     if args.resume and args.allow_dirty:
         raise SystemExit("--resume cannot be combined with --allow-dirty")
     output = args.output_dir.expanduser().resolve()
@@ -144,6 +155,12 @@ def main() -> int:
             system, args.artifact_path,
             allow_unverified_model=args.allow_unverified_model,
         )
+        external_endpoint = normalize_endpoint(args.endpoint) if args.endpoint else None
+        serving_identity = serving_provenance(
+            artifact,
+            external=external_endpoint is not None,
+            allow_unverified_external_endpoint=args.allow_unverified_external_endpoint,
+        )
         parser_plugin = resolve_granite_parser(system, args.parser_plugin)
         task = RepositoryTask(
             task_id=args.task_id or args.task_file.stem,
@@ -159,6 +176,7 @@ def main() -> int:
             "system_id": system.system_id,
             "system_config_hash": system.canonical_config_hash,
             "artifact": artifact.to_dict(),
+            "serving_provenance": serving_identity,
             "effective_serving_config": _sanitized_serving(serving),
             "effective_generation_config": asdict(system.generation),
             "effective_agent_config": asdict(system.agent),
@@ -174,10 +192,13 @@ def main() -> int:
         })
         resume_identity = build_resume_identity(
             artifact_content_sha256=artifact.inventory_sha256,
+            artifact_manifest_provenance_sha256=artifact.manifest_provenance_sha256,
             system_id=system.system_id,
             system_config_hash=system.canonical_config_hash,
             agent_timeout_seconds=args.agent_timeout,
-            endpoint_reused=bool(args.endpoint),
+            serving_mode="external_endpoint" if external_endpoint else "managed_subprocess",
+            external_endpoint=external_endpoint,
+            allow_unverified_external_endpoint=args.allow_unverified_external_endpoint,
             allow_dirty=args.allow_dirty,
             dry_run=args.dry_run,
             task={
@@ -217,9 +238,12 @@ def main() -> int:
                     "Cannot continue an incomplete single Agent run from a dirty repository"
                 )
         if args.dry_run:
-            endpoint = args.endpoint or f"http://127.0.0.1:{serving.port}"
+            endpoint = external_endpoint or f"http://127.0.0.1:{serving.port}"
             manifest["endpoint"] = endpoint
-            manifest["vllm_command"] = list(build_vllm_command(serving, artifact, parser_plugin=parser_plugin))
+            manifest["vllm_command"] = (
+                None if external_endpoint else
+                list(build_vllm_command(serving, artifact, parser_plugin=parser_plugin))
+            )
             manifest["agent_command"] = list(runner.command(task, endpoint, output))
             manifest["result"] = {"status": "dry_run_validated"}
             manifest["ended_at"] = _now()
@@ -229,13 +253,18 @@ def main() -> int:
 
         runner.validate_installation()
         server = VLLMServer(
-            system, artifact, output, serving=serving, endpoint=args.endpoint,
+            system, artifact, output, serving=serving, endpoint=external_endpoint,
+            allow_unverified_external_endpoint=args.allow_unverified_external_endpoint,
             parser_plugin=parser_plugin, startup_timeout=args.startup_timeout,
         ).start()
         _write(output / "serving_manifest.json", server.manifest())
         result = runner.run(
             task, server.endpoint, output, timeout=args.agent_timeout,
-            allow_dirty=args.allow_dirty, artifact_provenance=artifact.to_dict(),
+            allow_dirty=args.allow_dirty,
+            artifact_provenance={
+                "requested_local_artifact": artifact.to_dict(),
+                "serving_provenance": server.manifest()["serving_provenance"],
+            },
         )
         manifest["endpoint"] = server.endpoint
         manifest["result"] = result.to_dict()

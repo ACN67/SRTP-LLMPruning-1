@@ -71,6 +71,7 @@ def save_artifact(path, kind="qwen", method=None, depth=2, sparse=False):
         )
     artifact = ModelArtifact(str(path), artifact_kind, "full_checkpoint", True, spec.project_model_id, spec.architecture, spec.model_type, adapter.adapter_id, depth, digest, lineage, {"direct_evaluation": True, "vllm_serving": True}, {})
     write_artifact_manifest(path, artifact)
+    artifact = resolve_model_artifact(path, spec, adapter)
     return adapter, spec, artifact
 
 
@@ -97,6 +98,11 @@ class RecoveryTests(unittest.TestCase):
                 self.assertEqual(len(matched_target_modules(tiny(kind)[0], config().target_modules)), 14)
                 result, out = self.run_recovery(base, adapter, spec, artifact)
                 self.assertEqual(result.status, "success"); self.assertTrue((out / "adapter/artifact_manifest.json").is_file())
+                recovery_manifest = json.loads((out / "recovery_manifest.json").read_text())
+                self.assertEqual(
+                    len(recovery_manifest["adapter_artifact"]["manifest_provenance_sha256"]),
+                    64,
+                )
                 loaded = load_model_artifact(spec, adapter, out / "adapter", options=LoadOptions(dtype="float32"))
                 ids = torch.tensor([[3, 4]]); self.assertEqual(loaded.model(input_ids=ids).logits.shape[:2], ids.shape)
                 self.assertEqual(loaded.model.generate(ids, max_new_tokens=1, pad_token_id=0).shape, (1, 3))
@@ -132,6 +138,25 @@ class RecoveryTests(unittest.TestCase):
             (base / "artifact_manifest.json").unlink()
             (base / "tamper.txt").write_text("changed\n", encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "base artifact hash mismatch"):
+                load_model_artifact(
+                    spec,
+                    adapter,
+                    out / "adapter",
+                    options=LoadOptions(dtype="float32"),
+                )
+
+    def test_adapter_reload_rejects_changed_base_manifest_provenance(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp) / "base"
+            base.mkdir()
+            adapter, spec, artifact = save_artifact(base, "qwen")
+            result, out = self.run_recovery(base, adapter, spec, artifact)
+            self.assertEqual(result.status, "success")
+            manifest_path = base / "artifact_manifest.json"
+            raw = json.loads(manifest_path.read_text(encoding="utf-8"))
+            raw["artifact"]["metadata"]["scientific_declaration"] = "changed"
+            write_artifact_manifest(base, ModelArtifact.from_dict(raw["artifact"]))
+            with self.assertRaisesRegex(ValueError, "manifest provenance mismatch"):
                 load_model_artifact(
                     spec,
                     adapter,

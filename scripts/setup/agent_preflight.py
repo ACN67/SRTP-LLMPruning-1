@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src.agent_runner import get_agent_runner, list_agent_system_ids, load_agent_system_spec, resolve_artifact  # noqa: E402
+from src.agent_runner import get_agent_runner, list_agent_system_ids, load_agent_system_spec, normalize_endpoint, resolve_artifact, serving_provenance  # noqa: E402
 from src.agent_runner.serving import port_is_available, resolve_granite_parser  # noqa: E402
 
 
@@ -24,16 +24,22 @@ def main() -> int:
     parser.add_argument("--system", required=True, choices=list_agent_system_ids())
     parser.add_argument("--artifact-path", required=True, type=Path)
     parser.add_argument("--endpoint", help="When provided, GPU/vLLM executable checks are skipped")
+    parser.add_argument("--allow-unverified-external-endpoint", action="store_true")
     parser.add_argument("--allow-unverified-model", action="store_true")
     args = parser.parse_args()
+    if args.endpoint and not args.allow_unverified_external_endpoint:
+        parser.error("--endpoint requires --allow-unverified-external-endpoint")
+    if args.allow_unverified_external_endpoint and not args.endpoint:
+        parser.error("--allow-unverified-external-endpoint requires --endpoint")
     checks: dict[str, object] = {}
     try:
         system = load_agent_system_spec(args.system)
         checks["config"] = "ok"
-        checks["artifact"] = resolve_artifact(
+        artifact = resolve_artifact(
             system, args.artifact_path,
             allow_unverified_model=args.allow_unverified_model,
-        ).to_dict()
+        )
+        checks["artifact"] = artifact.to_dict()
         checks["model_provenance_policy"] = (
             "explicit_unverified_opt_in"
             if args.allow_unverified_model else "verified_dense_or_canonical_artifact_required"
@@ -43,8 +49,16 @@ def main() -> int:
         get_agent_runner(system).validate_installation()
         checks["agent_runner"] = "ok"
         if args.endpoint:
+            checks["endpoint"] = normalize_endpoint(args.endpoint)
+            checks["serving_provenance"] = serving_provenance(
+                artifact, external=True,
+                allow_unverified_external_endpoint=True,
+            )
             checks["serving"] = "external_endpoint"
         else:
+            checks["serving_provenance"] = serving_provenance(
+                artifact, external=False,
+            )
             executable = (ROOT / system.serving.executable).resolve()
             if not executable.is_file():
                 raise FileNotFoundError(f"vLLM executable is missing: {executable}")

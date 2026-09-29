@@ -68,6 +68,17 @@ def load_model_artifact(
             "PEFT adapter base artifact hash mismatch: "
             f"{resolved_base.content_sha256} != {base_hash}"
         )
+    expected_base_provenance = artifact.metadata.get(
+        "base_artifact_manifest_provenance_sha256"
+    )
+    if (
+        expected_base_provenance is not None
+        and resolved_base.manifest_provenance_sha256 != expected_base_provenance
+    ):
+        raise ValueError(
+            "PEFT adapter base artifact manifest provenance mismatch: "
+            f"{resolved_base.manifest_provenance_sha256} != {expected_base_provenance}"
+        )
     recovery_ops = [item for item in artifact.lineage if item.operation == "recovery"]
     if not recovery_ops or recovery_ops[-1].input_artifact_hash != base_hash:
         raise ValueError("PEFT adapter recovery lineage does not match its base artifact hash")

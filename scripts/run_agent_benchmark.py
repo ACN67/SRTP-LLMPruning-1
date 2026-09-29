@@ -13,6 +13,7 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,9 +23,12 @@ if str(ROOT) not in sys.path:
 from src.agent_benchmarks import AgentBenchmarkInstance, AgentBenchmarkResult, get_agent_benchmark, list_agent_benchmark_ids  # noqa: E402
 from src.agent_benchmarks.common import prediction_sha256, provision_repository, read_predictions, run_harness, write_predictions  # noqa: E402
 from src.agent_benchmarks.execution import load_dataset_records, select_records  # noqa: E402
-from src.agent_runner import RepositoryTask, VLLMServer, get_agent_runner, list_agent_system_ids, load_agent_system_spec, resolve_artifact  # noqa: E402
+from src.agent_runner import RepositoryTask, VLLMServer, get_agent_runner, list_agent_system_ids, load_agent_system_spec, normalize_endpoint, resolve_artifact, serving_provenance  # noqa: E402
 from src.agent_runner.serving import build_vllm_command, resolve_granite_parser  # noqa: E402
 from src.utils.identity import build_resume_identity, canonical_sha256, require_matching_resume_identity  # noqa: E402
+
+
+RUN_MANIFEST_SCHEMA_VERSION = "3.0"
 
 
 def _now() -> str:
@@ -58,6 +62,10 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--dataset-path", type=Path)
     parser.add_argument("--allow-incomplete-dataset", action="store_true", help="Only for tiny software smoke fixtures")
     parser.add_argument("--endpoint")
+    parser.add_argument(
+        "--allow-unverified-external-endpoint", action="store_true",
+        help="Explicitly accept that an external endpoint's checkpoint digest is unverifiable",
+    )
     parser.add_argument("--evaluator-workers", type=int, default=1)
     parser.add_argument("--evaluator-timeout", type=float, default=7200)
     parser.add_argument("--agent-timeout", type=float, default=3600)
@@ -70,24 +78,93 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _generation_contract(
+    *, artifact: Any, adapter: Any, system: Any, records: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return build_resume_identity(
+        artifact_content_sha256=artifact.inventory_sha256,
+        artifact_manifest_provenance_sha256=artifact.manifest_provenance_sha256,
+        benchmark_id=adapter.spec.benchmark_id,
+        benchmark_config_sha256=canonical_sha256(adapter.spec.to_dict()),
+        system_id=system.system_id,
+        system_config_hash=system.canonical_config_hash,
+        task_set_sha256=canonical_sha256(records),
+    )
+
+
+def _read_manifest(path: Path, *, label: str) -> tuple[dict[str, object], bytes]:
+    if not path.is_file():
+        raise SystemExit(f"{label} is missing: {path}")
+    payload = path.read_bytes()
+    try:
+        value = json.loads(payload)
+    except json.JSONDecodeError as error:
+        raise SystemExit(f"{label} is invalid JSON: {path}") from error
+    if not isinstance(value, dict):
+        raise SystemExit(f"{label} must contain a JSON object: {path}")
+    return value, payload
+
+
+def _validate_generation_upstream(
+    generation_path: Path,
+    predictions_path: Path,
+    *,
+    expected: dict[str, Any],
+) -> dict[str, Any]:
+    generation_manifest, generation_bytes = _read_manifest(
+        generation_path, label="Generate phase manifest",
+    )
+    mismatches = [
+        key for key, value in expected.items()
+        if generation_manifest.get(key) != value
+    ]
+    if not isinstance(generation_manifest.get("ended_at"), str):
+        mismatches.append("ended_at")
+    if mismatches:
+        raise SystemExit(
+            "Generate phase manifest identity/status mismatch: "
+            + ", ".join(mismatches)
+        )
+    if not predictions_path.is_file():
+        raise SystemExit(f"Generated predictions file is missing: {predictions_path}")
+    predictions_hash = hashlib.sha256(predictions_path.read_bytes()).hexdigest()
+    if generation_manifest.get("prediction_file_sha256") != predictions_hash:
+        raise SystemExit(
+            "Generated predictions file hash does not match generate phase manifest"
+        )
+    return {
+        "mode": "generated_predictions",
+        "generation_manifest_path": str(generation_path),
+        "generation_manifest_sha256": hashlib.sha256(generation_bytes).hexdigest(),
+        "prediction_file_sha256": predictions_hash,
+        "generation_contract_identity": expected["generation_contract_identity"],
+    }
+
+
 def main() -> int:
     args = _parser().parse_args()
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", args.run_id) or args.run_id in {".", ".."}:
         raise SystemExit("--run-id must be a safe path component")
     if args.resume and args.overwrite:
         raise SystemExit("--resume and --overwrite are mutually exclusive")
+    if args.endpoint and not args.allow_unverified_external_endpoint:
+        raise SystemExit(
+            "--endpoint requires --allow-unverified-external-endpoint because the "
+            "remote checkpoint identity cannot be verified"
+        )
+    if args.allow_unverified_external_endpoint and not args.endpoint:
+        raise SystemExit("--allow-unverified-external-endpoint requires --endpoint")
     adapter = get_agent_benchmark(args.benchmark)
     system = load_agent_system_spec(args.system)
     artifact = resolve_artifact(
         system, args.artifact_path,
         allow_unverified_model=args.allow_unverified_model,
     )
+    external_endpoint = normalize_endpoint(args.endpoint) if args.endpoint else None
     run_dir = (args.output_root / args.benchmark / args.system / args.run_id).expanduser().resolve()
     phase_manifest_path = run_dir / f"{args.phase}_run_manifest.json"
     previous_manifest = None
-    previous_path = (
-        phase_manifest_path if phase_manifest_path.is_file() else run_dir / "run_manifest.json"
-    )
+    previous_path = phase_manifest_path
     if previous_path.is_file():
         previous_manifest = json.loads(previous_path.read_text(encoding="utf-8"))
     if args.overwrite and args.phase == "generate" and run_dir.exists():
@@ -101,7 +178,8 @@ def main() -> int:
     instance_ids = _ids(args.instance_id)
     records = []
     resume_identity = None
-    if args.phase == "generate":
+    generation_contract = None
+    if args.phase == "generate" or not args.gold:
         records = select_records(
             load_dataset_records(
                 adapter.spec.dataset, offline=args.offline, local_path=args.dataset_path,
@@ -109,15 +187,16 @@ def main() -> int:
             ),
             instance_ids=instance_ids, limit=args.limit,
         )
+        generation_contract = _generation_contract(
+            artifact=artifact, adapter=adapter, system=system, records=records,
+        )
+    if args.phase == "generate":
         resume_identity = build_resume_identity(
-            artifact_content_sha256=artifact.inventory_sha256,
-            benchmark_id=args.benchmark,
-            benchmark_config_sha256=canonical_sha256(adapter.spec.to_dict()),
-            system_id=system.system_id,
-            system_config_hash=system.canonical_config_hash,
-            task_set_sha256=canonical_sha256(records),
+            generation_contract_sha256=generation_contract["sha256"],
             agent_timeout=args.agent_timeout,
-            endpoint_reused=bool(args.endpoint),
+            serving_mode="external_endpoint" if external_endpoint else "managed_subprocess",
+            external_endpoint=external_endpoint,
+            allow_unverified_external_endpoint=args.allow_unverified_external_endpoint,
             dry_run=args.dry_run,
         )
         if args.resume:
@@ -130,15 +209,24 @@ def main() -> int:
             except ValueError as error:
                 raise SystemExit(str(error)) from error
     manifest = {
-        "schema_version": "2.0", "benchmark": adapter.spec.to_dict(), "system_id": system.system_id,
+        "schema_version": RUN_MANIFEST_SCHEMA_VERSION, "benchmark": adapter.spec.to_dict(), "system_id": system.system_id,
+        "system_config_hash": system.canonical_config_hash,
         "artifact": artifact.to_dict(), "run_id": args.run_id, "phase": args.phase,
         "selection": {"instance_ids": list(instance_ids), "limit": args.limit},
-        "execution_options": {"offline": args.offline, "resume": args.resume, "overwrite": args.overwrite, "agent_timeout": args.agent_timeout, "evaluator_timeout": args.evaluator_timeout, "evaluator_workers": args.evaluator_workers, "endpoint_reused": bool(args.endpoint), "dataset_path": str(args.dataset_path) if args.dataset_path else "configured_exact_snapshot", "task_repo": str(args.task_repo) if args.task_repo else ("configured_pinned_task_repo" if args.benchmark.startswith("swebench_") else "not_applicable"), "allow_incomplete_dataset": args.allow_incomplete_dataset, "gold": args.gold},
+        "execution_options": {"offline": args.offline, "resume": args.resume, "overwrite": args.overwrite, "agent_timeout": args.agent_timeout, "evaluator_timeout": args.evaluator_timeout, "evaluator_workers": args.evaluator_workers, "serving_mode": "external_endpoint" if external_endpoint else "managed_subprocess", "external_endpoint": external_endpoint, "allow_unverified_external_endpoint": args.allow_unverified_external_endpoint, "dataset_path": str(args.dataset_path) if args.dataset_path else "configured_exact_snapshot", "task_repo": str(args.task_repo) if args.task_repo else ("configured_pinned_task_repo" if args.benchmark.startswith("swebench_") else "not_applicable"), "allow_incomplete_dataset": args.allow_incomplete_dataset, "gold": args.gold},
         "paths": {"run_dir": str(run_dir), "predictions": str(predictions_path)}, "started_at": _now(),
         "model_provenance_policy": "explicit_unverified_opt_in" if args.allow_unverified_model else "verified_dense_or_canonical_artifact_required",
     }
     if resume_identity is not None:
         manifest["resume_identity"] = resume_identity
+    if generation_contract is not None:
+        manifest["generation_contract_identity"] = generation_contract
+    if args.phase == "generate":
+        manifest["serving_provenance"] = serving_provenance(
+            artifact,
+            external=external_endpoint is not None,
+            allow_unverified_external_endpoint=args.allow_unverified_external_endpoint,
+        )
     def write_manifest() -> None:
         _write(phase_manifest_path, manifest)
         _write(run_dir / "run_manifest.json", manifest)
@@ -148,6 +236,29 @@ def main() -> int:
         if not args.resume:
             write_manifest()
     if args.phase == "evaluate":
+        if args.gold:
+            manifest["evaluation_input"] = {
+                "mode": "gold_evaluator_only",
+                "prediction_provenance_required": False,
+            }
+        else:
+            assert generation_contract is not None
+            generation_path = run_dir / "generate_run_manifest.json"
+            required_equal = {
+                "schema_version": RUN_MANIFEST_SCHEMA_VERSION,
+                "phase": "generate",
+                "status": "completed",
+                "run_id": args.run_id,
+                "benchmark": adapter.spec.to_dict(),
+                "system_id": system.system_id,
+                "system_config_hash": system.canonical_config_hash,
+                "selection": {"instance_ids": list(instance_ids), "limit": args.limit},
+                "generation_contract_identity": generation_contract,
+            }
+            manifest["evaluation_input"] = _validate_generation_upstream(
+                generation_path, predictions_path, expected=required_equal,
+            )
+        manifest["status"] = "running"
         if args.check_runtime:
             if shutil.which("docker") is None:
                 raise SystemExit("Docker executable is unavailable")
@@ -211,6 +322,7 @@ def main() -> int:
                 results.append(result.to_dict())
             results_path = run_dir / "evaluation" / "benchmark_results.jsonl"
             results_path.write_text("".join(json.dumps(item, sort_keys=True, ensure_ascii=False) + "\n" for item in results), encoding="utf-8")
+        manifest["status"] = "completed"
         manifest["ended_at"] = _now()
         write_manifest()
         print(json.dumps(manifest, indent=2, ensure_ascii=False))
@@ -229,9 +341,11 @@ def main() -> int:
     runner = get_agent_runner(system)
     parser_plugin = resolve_granite_parser(system)
     if args.dry_run:
-        endpoint = args.endpoint or f"http://127.0.0.1:{system.serving.port}"
-        manifest["vllm_command"] = list(
-            build_vllm_command(system.serving, artifact, parser_plugin=parser_plugin)
+        endpoint = external_endpoint or f"http://127.0.0.1:{system.serving.port}"
+        manifest["vllm_command"] = (
+            None if external_endpoint else list(
+                build_vllm_command(system.serving, artifact, parser_plugin=parser_plugin)
+            )
         )
         manifest["instances"] = []
         for row in records:
@@ -245,9 +359,12 @@ def main() -> int:
         print(json.dumps(manifest, indent=2, ensure_ascii=False))
         return 0
     server = VLLMServer(
-        system, artifact, run_dir / "serving", endpoint=args.endpoint,
+        system, artifact, run_dir / "serving", endpoint=external_endpoint,
+        allow_unverified_external_endpoint=args.allow_unverified_external_endpoint,
         parser_plugin=parser_plugin,
     ).start()
+    manifest["serving"] = server.manifest()
+    _write(run_dir / "serving" / "serving_manifest.json", server.manifest())
     outcomes: dict[str, object] = {}
     try:
         for row in records:
@@ -259,7 +376,16 @@ def main() -> int:
             provisioned = None
             try:
                 provisioned = provision_repository(instance.repo, instance.base_commit, instance.instance_id, repo_cache_root=args.repo_cache_root, workspace_root=args.workspace_root, offline=args.offline)
-                result = runner.run(adapter.prepare_task(instance, provisioned.worktree_path), server.endpoint, instance_dir / "agent", timeout=args.agent_timeout, artifact_provenance=artifact.to_dict())
+                result = runner.run(
+                    adapter.prepare_task(instance, provisioned.worktree_path),
+                    server.endpoint,
+                    instance_dir / "agent",
+                    timeout=args.agent_timeout,
+                    artifact_provenance={
+                        "requested_local_artifact": artifact.to_dict(),
+                        "serving_provenance": server.manifest()["serving_provenance"],
+                    },
+                )
                 _write(instance_dir / "agent_result.json", result.to_dict())
                 if result.status == "patch_generated":
                     prior[instance.instance_id] = adapter.build_prediction(result)
@@ -279,8 +405,11 @@ def main() -> int:
             write_manifest()
     finally:
         server.stop()
+        manifest["serving"] = server.manifest()
+        _write(run_dir / "serving" / "serving_manifest.json", server.manifest())
     manifest["prediction_file_sha256"] = hashlib.sha256(predictions_path.read_bytes()).hexdigest() if predictions_path.is_file() else ""
     manifest["outcomes"] = outcomes
+    manifest["status"] = "completed"
     manifest["ended_at"] = _now()
     write_manifest()
     print(json.dumps(manifest, indent=2, ensure_ascii=False))

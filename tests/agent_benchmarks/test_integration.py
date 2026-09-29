@@ -37,7 +37,10 @@ class BenchmarkEndToEndTests(unittest.TestCase):
                     system, make_artifact(root / "model"), allow_unverified_model=True
                 )
                 endpoint = f"http://127.0.0.1:{httpd.server_address[1]}"
-                with VLLMServer(system, artifact, root / "server", endpoint=endpoint, startup_timeout=2) as server:
+                with VLLMServer(
+                    system, artifact, root / "server", endpoint=endpoint,
+                    allow_unverified_external_endpoint=True, startup_timeout=2,
+                ) as server:
                     result = get_agent_runner(system).run(adapter.prepare_task(instance, provisioned.worktree_path), server.endpoint, root / "agent", timeout=60, artifact_provenance=artifact.to_dict())
                 prediction = adapter.build_prediction(result)
                 digest = write_predictions(root / "predictions.jsonl", [prediction])

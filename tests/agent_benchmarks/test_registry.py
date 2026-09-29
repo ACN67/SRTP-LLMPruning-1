@@ -41,9 +41,16 @@ class AgentBenchmarkRegistryTests(unittest.TestCase):
                 subprocess.run((*common, "--phase", "generate", "--dataset-path", str(dataset), "--offline", "--allow-incomplete-dataset", "--dry-run"), cwd=ROOT, check=True, capture_output=True, text=True)
                 prediction_path = root / "results" / benchmark / "klear_agentforge_8b" / "dry" / "predictions.jsonl"
                 write_predictions(prediction_path, [{"instance_id": row["instance_id"], "model_name_or_path": "klear_agentforge_8b", "model_patch": "diff --git a/a b/a\n"}])
-                subprocess.run((*common, "--phase", "evaluate", "--dry-run"), cwd=ROOT, check=True, capture_output=True, text=True)
+                subprocess.run((*common, "--phase", "evaluate", "--gold", "--dry-run"), cwd=ROOT, check=True, capture_output=True, text=True)
                 command = json.loads((prediction_path.parent / "evaluation/evaluator_command.json").read_text())["command"]
                 self.assertTrue("--run-id" in command or "--run_id" in command)
+                evaluate_manifest = json.loads(
+                    (prediction_path.parent / "evaluate_run_manifest.json").read_text()
+                )
+                self.assertEqual(
+                    evaluate_manifest["evaluation_input"]["mode"],
+                    "gold_evaluator_only",
+                )
 
 
 if __name__ == "__main__": unittest.main()

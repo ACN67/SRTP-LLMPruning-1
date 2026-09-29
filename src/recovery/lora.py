@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from src.artifacts import LineageOperation, ModelArtifact, artifact_inventory, write_artifact_manifest
+from src.artifacts import LineageOperation, ModelArtifact, artifact_inventory, read_artifact_manifest, write_artifact_manifest
 from src.models.base import BaseModelAdapter, ModelSpec
 from src.models.loader import LoadedModel
 
@@ -121,8 +121,9 @@ class LoRARecovery:
         PeftConfig.from_pretrained(adapter_dir)
         _entries, adapter_hash = artifact_inventory(adapter_dir)
         recovery_op = LineageOperation("recovery", "lora", config.canonical_hash, input_artifact.content_sha256, {"merge_policy": config.merge_policy, "rank": config.rank, "alpha": config.lora_alpha}, {"peft_version": PEFT_VERSION, "peft_revision": PEFT_REVISION, "protocol_status": config.protocol_status})
-        adapter_artifact = ModelArtifact(str(adapter_dir), "recovered", "peft_adapter", False, spec.project_model_id, spec.architecture, spec.model_type, adapter.adapter_id, depth_before, adapter_hash, input_artifact.lineage + (recovery_op,), {"direct_evaluation": True, "vllm_serving": False}, {"base_artifact_path": input_artifact.path, "base_artifact_hash": input_artifact.content_sha256})
+        adapter_artifact = ModelArtifact(str(adapter_dir), "recovered", "peft_adapter", False, spec.project_model_id, spec.architecture, spec.model_type, adapter.adapter_id, depth_before, adapter_hash, input_artifact.lineage + (recovery_op,), {"direct_evaluation": True, "vllm_serving": False}, {"base_artifact_path": input_artifact.path, "base_artifact_hash": input_artifact.content_sha256, "base_artifact_manifest_provenance_sha256": input_artifact.manifest_provenance_sha256})
         write_artifact_manifest(adapter_dir, adapter_artifact)
+        adapter_artifact = read_artifact_manifest(adapter_dir)
         merge_decision = {"policy": config.merge_policy, "weight_sparse_input": input_artifact.is_weight_sparse, "explicit_sparsity_change_opt_in": config.allow_sparse_merge}
         merged_artifact = None; sparse_after = sparse_before; reload_status = "adapter_config_reloaded"
         if config.merge_policy == "adapter_only":
@@ -137,8 +138,9 @@ class LoRARecovery:
             merged.save_pretrained(merged_dir, safe_serialization=True)
             if hasattr(loaded.tokenizer, "save_pretrained"): loaded.tokenizer.save_pretrained(merged_dir)
             _entries, merged_hash = artifact_inventory(merged_dir)
-            merged_artifact = ModelArtifact(str(merged_dir), "recovered", "full_checkpoint", True, spec.project_model_id, spec.architecture, spec.model_type, adapter.adapter_id, depth_before, merged_hash, input_artifact.lineage + (recovery_op,), {"direct_evaluation": True, "vllm_serving": True}, {"adapter_artifact_hash": adapter_hash, "sparsity_preserved": sparse_before == sparse_after})
+            merged_artifact = ModelArtifact(str(merged_dir), "recovered", "full_checkpoint", True, spec.project_model_id, spec.architecture, spec.model_type, adapter.adapter_id, depth_before, merged_hash, input_artifact.lineage + (recovery_op,), {"direct_evaluation": True, "vllm_serving": True}, {"adapter_artifact_hash": adapter_hash, "input_artifact_manifest_provenance_sha256": input_artifact.manifest_provenance_sha256, "sparsity_preserved": sparse_before == sparse_after})
             write_artifact_manifest(merged_dir, merged_artifact)
+            merged_artifact = read_artifact_manifest(merged_dir)
             del merged; gc.collect()
             reloaded = AutoModelForCausalLM.from_pretrained(merged_dir, local_files_only=True, dtype=getattr(torch, config.dtype)); reloaded.eval()
             if adapter.get_num_blocks(reloaded) != depth_before: raise RuntimeError("Reloaded merged model changed layer count")

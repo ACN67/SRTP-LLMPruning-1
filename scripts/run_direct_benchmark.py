@@ -226,6 +226,9 @@ def generate(args: argparse.Namespace, run_dir: Path, benchmark: Any, tasks: lis
     artifact_provenance = _artifact_provenance(args)
     resume_identity = build_resume_identity(
         artifact_content_sha256=artifact_provenance["content_sha256"],
+        artifact_manifest_provenance_sha256=artifact_provenance.get(
+            "manifest_provenance_sha256"
+        ),
         benchmark_id=args.benchmark,
         benchmark_source_revision=benchmark.spec.source_revision,
         benchmark_metadata_sha256=canonical_sha256(benchmark.spec.metadata),

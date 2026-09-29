@@ -52,6 +52,7 @@ class ModelArtifact:
     lineage: tuple[LineageOperation, ...] = ()
     capabilities: Mapping[str, bool] = field(default_factory=dict)
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    manifest_provenance_sha256: str | None = None
 
     def __post_init__(self) -> None:
         if self.kind not in {"dense", "pruned", "recovered"}:
@@ -62,6 +63,11 @@ class ModelArtifact:
             raise ValueError("A PEFT adapter cannot be marked standalone")
         if self.num_hidden_layers <= 0 or not _is_sha256(self.content_sha256):
             raise ValueError("Artifact depth/hash is invalid")
+        if (
+            self.manifest_provenance_sha256 is not None
+            and not _is_sha256(self.manifest_provenance_sha256)
+        ):
+            raise ValueError("Artifact manifest provenance hash is invalid")
         operations = tuple(item.operation for item in self.lineage)
         if self.kind == "dense" and operations:
             raise ValueError("Dense artifacts cannot contain transformation lineage")

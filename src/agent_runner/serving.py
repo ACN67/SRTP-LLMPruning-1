@@ -10,6 +10,7 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
+from urllib.parse import urlsplit, urlunsplit
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -42,6 +43,7 @@ class ArtifactServingSpec:
     canonical_artifact: Mapping[str, Any]
     config_sha256: str
     inventory_sha256: str
+    manifest_provenance_sha256: str | None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -71,7 +73,47 @@ def resolve_artifact(
         pruning_method=shared.pruning_method, pruning_provenance={"operations": pruning},
         canonical_artifact=shared.to_dict(),
         config_sha256=sha256_file(config_path), inventory_sha256=shared.content_sha256,
+        manifest_provenance_sha256=shared.manifest_provenance_sha256,
     )
+
+
+def normalize_endpoint(endpoint: str) -> str:
+    """Canonicalize an HTTP(S) endpoint for manifests and run identities."""
+
+    parsed = urlsplit(endpoint.strip())
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
+        raise ValueError("External endpoint must be an absolute http(s) URL")
+    if parsed.username or parsed.password or parsed.query or parsed.fragment:
+        raise ValueError("External endpoint must not contain credentials, query, or fragment")
+    host = parsed.hostname.lower()
+    if ":" in host:
+        host = f"[{host}]"
+    port = parsed.port
+    default_port = 80 if parsed.scheme.lower() == "http" else 443
+    netloc = host if port in {None, default_port} else f"{host}:{port}"
+    path = parsed.path.rstrip("/")
+    return urlunsplit((parsed.scheme.lower(), netloc, path, "", ""))
+
+
+def serving_provenance(
+    artifact: ArtifactServingSpec,
+    *,
+    external: bool,
+    allow_unverified_external_endpoint: bool = False,
+) -> dict[str, Any]:
+    if external:
+        return {
+            "checkpoint_identity_status": "unverified_external_endpoint",
+            "explicit_unverified_external_opt_in": allow_unverified_external_endpoint,
+            "requested_local_artifact_content_sha256": artifact.inventory_sha256,
+            "requested_local_artifact_manifest_provenance_sha256": artifact.manifest_provenance_sha256,
+        }
+    return {
+        "checkpoint_identity_status": "verified_managed_local_artifact",
+        "explicit_unverified_external_opt_in": False,
+        "served_artifact_content_sha256": artifact.inventory_sha256,
+        "served_artifact_manifest_provenance_sha256": artifact.manifest_provenance_sha256,
+    }
 
 
 def resolve_granite_parser(system: AgentSystemSpec, explicit_path: Path | None = None) -> Path | None:
@@ -149,6 +191,7 @@ class VLLMServer:
         *,
         serving: ServingSpec | None = None,
         endpoint: str | None = None,
+        allow_unverified_external_endpoint: bool = False,
         parser_plugin: Path | None = None,
         startup_timeout: float = 600.0,
         terminate_timeout: float = 20.0,
@@ -161,7 +204,13 @@ class VLLMServer:
         self.serving = serving or system.serving
         self.output_dir = output_dir.expanduser().resolve()
         self.external = endpoint is not None
-        self.endpoint = endpoint.rstrip("/") if endpoint else f"http://{_connect_host(self.serving.host)}:{self.serving.port}"
+        if self.external and not allow_unverified_external_endpoint:
+            raise ValueError(
+                "External endpoint checkpoint identity cannot be verified; pass "
+                "--allow-unverified-external-endpoint to accept this provenance boundary"
+            )
+        self.allow_unverified_external_endpoint = allow_unverified_external_endpoint
+        self.endpoint = normalize_endpoint(endpoint) if endpoint else f"http://{_connect_host(self.serving.host)}:{self.serving.port}"
         self.parser_plugin = parser_plugin
         self.startup_timeout = startup_timeout
         self.terminate_timeout = terminate_timeout
@@ -264,6 +313,11 @@ class VLLMServer:
             "endpoint": self.endpoint,
             "served_model_name": self.serving.served_model_name,
             "vllm_version": self.serving.version,
+            "serving_provenance": serving_provenance(
+                self.artifact,
+                external=self.external,
+                allow_unverified_external_endpoint=self.allow_unverified_external_endpoint,
+            ),
         }
         for key, value in (
             ("started_at", self.started_at), ("ready_at", self.ready_at),

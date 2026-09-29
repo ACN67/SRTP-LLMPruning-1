@@ -83,6 +83,10 @@ python3 scripts/setup/preflight.py --gpu
 python3 scripts/setup/preflight.py --paths
 ```
 
+canonical pruned/recovered artifact 使用 schema 2 `artifact_manifest.json`：模型 bytes 的 `content_sha256` 与路径无关的 `artifact_provenance_sha256` 分层验证。旧 schema 1 artifact 会明确拒绝，不能被视为已有 provenance 保护，也不会自动升级；应使用当前 writer 重新生成。
+
+Agent 的 managed vLLM 会把 serving checkpoint 绑定到本地 artifact identity。复用 external endpoint 时，标准 `/v1/models` 只能证明 served model name，不能证明 checkpoint digest；single/batch/preflight 均要求显式传 `--allow-unverified-external-endpoint`，并把规范化 URL 与 unverified 状态写入 manifest。non-gold Agent evaluate 还会验证已完成的 `generate_run_manifest.json`、predictions SHA256 和 generation contract；gold evaluate 会明确记录为 evaluator-only。
+
 确认环境可用后，关机并在 AutoDL 控制台保存平台镜像。该镜像保存系统盘中的代码和 Python 环境，不保存 `/root/autodl-tmp` 数据盘内容。
 
 ## 标准 Docker / OCI 服务器

@@ -117,7 +117,7 @@ verified model snapshot + pinned datasets
 
 国内默认 transport 是 ModelScope，科学身份始终是 canonical Hugging Face repository + exact commit。SWE-Lego 没有已核实的 ModelScope 镜像，必须显式使用 `--download-source official`。下载器逐文件校验 size/hash，使用 `.part` 和 atomic rename；国内源失败不会静默切换官方源。
 
-正式入口对 canonical/project-downloaded local dense snapshot 默认要求 `.srtp_model_source.json` 的 verified provenance 与当前 content hash 一致。开发 fixture 可显式传 `--allow-unverified-model`；该 opt-in 会写入 manifest。canonical pruned/recovered artifact 继续以 `artifact_manifest.json`、完整 content hash 和 lineage 为边界。canonical artifact 目录禁止 symlink。
+正式入口对 canonical/project-downloaded local dense snapshot 默认要求 `.srtp_model_source.json` 的 verified provenance 与当前 content hash 一致。开发 fixture 可显式传 `--allow-unverified-model`；该 opt-in 会写入 manifest。canonical pruned/recovered artifact 同时具有两层身份：`content_sha256` 绑定模型文件 bytes，schema 2 `artifact_provenance_sha256` 以 canonical JSON 绑定模型身份、lineage、method、parameters 与 provenance。后者排除 artifact 自身路径和 LoRA `base_artifact_path` location hint，因此合法搬运不改变科研身份。读取时两层都会验证；旧 schema 1 artifact 不会伪装成已保护状态，也不会自动“认证”旧 provenance，必须由当前 writer 重新生成。canonical artifact 目录禁止 symlink。
 
 旧 schema v2 sidecar 不会触发重新下载，但正式入口会 fail closed，并提示重新验证。对已有 snapshot 原地运行 `scripts/setup/verify_model_snapshot.py` 会重新核验现有文件、计算 content identity，并把 sidecar 升级为 schema v3；权重 shard 无需重新下载。
 
@@ -188,6 +188,8 @@ single-task preflight 与 dry-run：
 
 Granite single/batch managed vLLM 使用同一个 `resolve_granite_parser()` 路径；其他模型不注入 parser plugin。Agent generation 的成功状态名为 `patch_generated`，只表示 Agent 正常退出并产生非空 patch；它不表示 benchmark resolved。正式 resolved/unresolved 只来自 evaluator。
 
+managed vLLM 由仓库从已验证的 local artifact 启动，serving manifest 会把实际启动 checkpoint 绑定到 content/provenance identity。`--endpoint` 只能验证 OpenAI-compatible endpoint 暴露的 model name，标准 vLLM API 不提供 checkpoint digest；因此 external endpoint 默认 fail closed，必须显式增加 `--allow-unverified-external-endpoint`。该降级状态、规范化 endpoint URL 和 opt-in 会写入 manifest/resume identity；它只表示用户接受“远端 checkpoint identity 未验证”，绝不证明远端模型等于 `--artifact-path`。
+
 旧 manifest 中 generation `status: success` 不会被静默解释为 evaluator 成功，也不会在缺少新 `resume_identity` 时继续复用；旧结果仍可审计，继续运行需用 `--overwrite` 明确新建当前 schema 的输出。
 
 Agent benchmark generation/evaluation 示例：
@@ -211,6 +213,8 @@ Agent benchmark generation/evaluation 示例：
 ```
 
 Agent resume identity 同时绑定 artifact content、system config、benchmark config 与选中 task 内容。single Agent 还绑定 problem statement、base/HEAD commit 和 serving config。`--resume` 与 `--overwrite` 互斥。
+
+non-gold evaluate 只接受同一 run 的已完成 `generate_run_manifest.json`：程序会重算 `predictions.jsonl` SHA256，并核对 run-id、artifact content/provenance identity、benchmark/system config 和 task selection。evaluate manifest 记录 generate manifest 自身 SHA256，形成 generate → predictions → evaluate 的可审计链；`running`、dry-run、缺失或损坏的 generate manifest 均被拒绝。`--gold` 是明确标记的 evaluator-only 路径，不要求 predictions provenance。
 
 SWE/SWT setup 会固化 exact-revision local dataset snapshot 和 SHA256 sidecar；正式 evaluator 使用 pinned harness。软件/schema/command 测试不等于 Docker evaluator 已运行。
 
