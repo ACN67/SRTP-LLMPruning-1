@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import gzip
 import json
+import re
+import ast
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -82,7 +84,9 @@ class MBPPBenchmark(BaseBenchmark):
 
     def build_prompt(self, task: BenchmarkTask) -> str:
         first_test = task.data["test_list"][0]
-        return f'"""\n{task.data["text"]}\n{first_test}\n"""\n'
+        return ("Write the final executable Python solution. Return only one Python "
+                "code block, with no reasoning or printed examples.\n\n"
+                f'"""\n{task.data["text"]}\n{first_test}\n"""\n')
 
     def postprocess_generation(self, text: str) -> str:
         return _last_fenced_or_plain(text)
@@ -98,12 +102,60 @@ class MBPPBenchmark(BaseBenchmark):
         return run_checked(task.task_id, code, timeout=timeout)
 
 
+def _valid_python(code: str) -> bool:
+    if not code.strip():
+        return False
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        # HumanEval may return only the indented continuation of its function.
+        if not code.startswith((" ", "\t")):
+            return False
+        try:
+            tree = ast.parse("def _continuation():\n" + code)
+        except SyntaxError:
+            return False
+    return any(not isinstance(node, (ast.Expr, ast.Pass)) or
+               isinstance(getattr(node, "value", None), ast.Call)
+               for node in tree.body)
+
+
 def _last_fenced_or_plain(text: str) -> str:
-    lines = text.split("\n")
-    indices = [index for index, line in enumerate(lines) if "```" in line]
-    if len(indices) >= 2:
-        return "\n".join(lines[indices[-2] + 1 : indices[-1]]).strip()
-    return text.strip()
+    """Select the last valid explicit Python fence, then valid unlabelled code.
+
+    Display fences (text/output/etc.) and unfinished reasoning never become code.
+    Syntax is a format check only; benchmark tests never select a candidate.
+    """
+    if "<think>" in text:
+        if "</think>" not in text.rsplit("<think>", 1)[-1]:
+            return ""
+        text = text.rsplit("</think>", 1)[-1]
+    lines = text.splitlines()
+    candidates: list[tuple[int, int, str]] = []
+    opening: tuple[int, str] | None = None
+    for index, line in enumerate(lines):
+        match = re.match(r"^\s*```\s*([\w+-]*)\s*$", line)
+        if not match:
+            continue
+        if opening is None:
+            opening = (index, match.group(1).lower())
+        else:
+            start, language = opening
+            code = "\n".join(lines[start + 1:index]).strip("\n")
+            if language in ("python", "py", "python3", "") and _valid_python(code):
+                candidates.append((1 if language else 0, index, code.strip("\n")))
+            opening = None
+    if opening is not None:
+        start, language = opening
+        code = "\n".join(lines[start + 1:]).strip("\n")
+        if language in ("python", "py", "python3", "") and _valid_python(code):
+            candidates.append((1 if language else 0, len(lines), code.strip("\n")))
+    if candidates:
+        return max(candidates) [2]
+    if "```" in text:
+        return ""
+    code = text.strip("\n")
+    return code if _valid_python(code) else ""
 
 
 class LiveCodeBenchBenchmark(BaseBenchmark):

@@ -104,6 +104,42 @@ class BenchmarkCliTests(unittest.TestCase):
             allow_unverified_model=False, base_artifact_path=None,
         )
 
+    def write_generation_manifest(self, run_dir, benchmark, profile, tasks):
+        path = run_dir / "generations.jsonl"
+        fields = {
+            "artifact_content_sha256": "a" * 64,
+            "artifact_manifest_provenance_sha256": None,
+            "benchmark_id": "humaneval",
+            "benchmark_source_revision": benchmark.spec.source_revision,
+            "benchmark_metadata_sha256": self.module.canonical_sha256(benchmark.spec.metadata),
+            "prompt_protocol": benchmark.spec.prompt_protocol,
+            "code_extraction_protocol": benchmark.spec.code_extraction_protocol,
+            "tokenizer_input_protocol": self.module.TOKENIZER_INPUT_PROTOCOL,
+            "decode_protocol": self.module.DECODE_PROTOCOL,
+            "source_archive_sha256": None,
+            "task_id_hash": self.module.task_id_hash(tasks),
+            "evaluation_profile": profile.to_dict(),
+        }
+        resume_sha = self.module.canonical_sha256(fields)
+        (run_dir / "generation_manifest.json").write_text(json.dumps({
+            "schema_version": 4,
+            "prompt_protocol": benchmark.spec.prompt_protocol,
+            "code_extraction_protocol": benchmark.spec.code_extraction_protocol,
+            "tokenizer_input_protocol": self.module.TOKENIZER_INPUT_PROTOCOL,
+            "decode_protocol": self.module.DECODE_PROTOCOL,
+            "evaluation_profile_id": profile.profile_id,
+            "evaluation_profile_version": profile.profile_version,
+            "effective_evaluation_profile": profile.to_dict(),
+            "benchmark_source_revision": benchmark.spec.source_revision,
+            "benchmark_metadata": benchmark.spec.metadata,
+            "task_id_hash": self.module.task_id_hash(tasks),
+            "task_ids": [task.task_id for task in tasks],
+            "source_archive_sha256": None,
+            "resume_identity": {"sha256": resume_sha, "fields": fields},
+            "generations_sha256": self.module._sha256(path),
+        }), encoding="utf-8")
+        return resume_sha
+
     def test_evaluation_rejects_missing_and_duplicate_tasks(self):
         benchmark = SimpleNamespace(
             spec=SimpleNamespace(source_revision="a" * 40, metadata={}, prompt_protocol="p",
@@ -119,11 +155,13 @@ class BenchmarkCliTests(unittest.TestCase):
             )
             profile = SimpleNamespace(profile_id="p1", profile_version=2, num_trials=1,
                                       to_dict=lambda: {})
+            self.write_generation_manifest(run_dir, benchmark, profile, tasks)
             with self.assertRaisesRegex(ValueError, "exactly match"):
                 self.module.evaluate(args, run_dir, benchmark, tasks, 2, profile, False)
             Path(run_dir, "generations.jsonl").write_text(
                 (json.dumps({"task_id": "a", "trial_index": 0}) + "\n") * 2, encoding="utf-8"
             )
+            self.write_generation_manifest(run_dir, benchmark, profile, tasks)
             with self.assertRaisesRegex(ValueError, "exactly match"):
                 self.module.evaluate(args, run_dir, benchmark, tasks, 2, profile, False)
 
@@ -135,6 +173,7 @@ class BenchmarkCliTests(unittest.TestCase):
             evaluate=lambda task, code, timeout: TaskEvaluation(
                 task.task_id, code == "good", "passed" if code == "good" else "wrong"
             ),
+            postprocess_generation=lambda raw: raw,
         )
         profile = SimpleNamespace(profile_id="p2", profile_version=2, num_trials=2,
                                   to_dict=lambda: {"profile_id": "p2", "num_trials": 2})
@@ -145,19 +184,34 @@ class BenchmarkCliTests(unittest.TestCase):
             run_dir.mkdir(parents=True)
             common = {"benchmark": "humaneval", "task_id": "a",
                       "project_model_id": args.model, "artifact_kind": "dense",
-                      "artifact_label": "dense", "prompt_protocol": "p",
-                      "evaluation_profile_id": "p2", "prompt_sha256": "x",
-                      "raw_generation": "x", "generation_success": True, "error": None}
+                      "artifact_label": "dense", "prompt_protocol": "p", "code_extraction_protocol": "e",
+                      "evaluation_profile_id": "p2", "evaluation_profile_version": 2,
+                      "tokenizer_input_protocol": self.module.TOKENIZER_INPUT_PROTOCOL,
+                      "decode_protocol": self.module.DECODE_PROTOCOL,
+                      "record_schema_version": 4, "prompt_sha256": "x",
+                      "generation_success": True, "final_answer_complete": True,
+                      "finish_reason": "eos", "error": None}
             records = [
-                {**common, "trial_index": 0, "seed": 0, "processed_generation": "good"},
-                {**common, "trial_index": 1, "seed": 1, "processed_generation": "bad"},
+                {**common, "trial_index": 0, "seed": 0, "raw_generation": "good", "processed_generation": "good"},
+                {**common, "trial_index": 1, "seed": 1, "raw_generation": "bad", "processed_generation": "bad"},
             ]
             self.module._write_jsonl(run_dir / "generations.jsonl", records)
+            resume_sha = self.write_generation_manifest(run_dir, benchmark, profile, [task])
+            for record in records:
+                record["resume_identity_sha256"] = resume_sha
+            self.module._write_jsonl(run_dir / "generations.jsonl", records)
+            self.write_generation_manifest(run_dir, benchmark, profile, [task])
             self.module.evaluate(args, run_dir, benchmark, [task], 1, profile, False)
             summary = json.loads((run_dir / "evaluation.json").read_text())
             manifest = json.loads((run_dir / "evaluation_manifest.json").read_text())
             outcomes = self.module._read_jsonl(run_dir / "outcomes.jsonl")
             errors = self.module._read_jsonl(run_dir / "errors.jsonl")
+            generated_manifest_path = run_dir / "generation_manifest.json"
+            old_manifest = json.loads(generated_manifest_path.read_text())
+            old_manifest.pop("tokenizer_input_protocol")
+            generated_manifest_path.write_text(json.dumps(old_manifest), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "protocol mismatch: tokenizer_input_protocol"):
+                self.module.evaluate(args, run_dir, benchmark, [task], 1, profile, False)
         self.assertEqual(summary["per_trial_pass_at_1"], [1.0, 0.0])
         self.assertEqual((summary["pass_at_1_mean"], summary["pass_at_1_std"]), (0.5, 0.5))
         self.assertNotIn("pass_at_8", summary)
@@ -288,6 +342,7 @@ class BenchmarkCliTests(unittest.TestCase):
             spec=SimpleNamespace(source_revision="a" * 40, metadata={}, prompt_protocol="p",
                 code_extraction_protocol="e"),
             evaluate=lambda task, code, timeout: TaskEvaluation(task.task_id, True, "passed"),
+            postprocess_generation=lambda raw: raw,
         )
         profile = SimpleNamespace(profile_id="p", profile_version=2, num_trials=1,
                                   to_dict=lambda: {"profile_id": "p"})
@@ -303,11 +358,19 @@ class BenchmarkCliTests(unittest.TestCase):
                 record = {
                     "benchmark": "humaneval", "task_id": "a", "trial_index": 0, "seed": 0,
                     "project_model_id": args.model, "artifact_kind": "dense", "artifact_label": "dense",
-                    "prompt_protocol": "p", "evaluation_profile_id": "p", "prompt_sha256": "x",
+                    "prompt_protocol": "p", "code_extraction_protocol": "e", "evaluation_profile_id": "p",
+                    "evaluation_profile_version": 2, "tokenizer_input_protocol": self.module.TOKENIZER_INPUT_PROTOCOL,
+                    "decode_protocol": self.module.DECODE_PROTOCOL, "record_schema_version": 4,
+                    "prompt_sha256": "x",
                     "raw_generation": "x", "processed_generation": "x",
-                    "generation_success": True, "error": None,
+                    "generation_success": True, "final_answer_complete": True,
+                    "finish_reason": "eos", "error": None,
                 }
                 self.module._write_jsonl(run_dir / "generations.jsonl", [record])
+                resume_sha = self.write_generation_manifest(run_dir, benchmark, profile, [task])
+                record["resume_identity_sha256"] = resume_sha
+                self.module._write_jsonl(run_dir / "generations.jsonl", [record])
+                self.write_generation_manifest(run_dir, benchmark, profile, [task])
                 self.module.evaluate(args, run_dir, benchmark, [task], 1, profile, False)
                 manifest = json.loads((run_dir / "evaluation_manifest.json").read_text())
                 recorded.append(manifest["evaluator"]["per_test_timeout_seconds"])

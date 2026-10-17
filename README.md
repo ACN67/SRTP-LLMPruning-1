@@ -10,7 +10,7 @@
 | --- | --- | --- |
 | Software implemented | 已实现 | 模型 adapter、五类剪枝、LoRA、Direct/Agent workflow 和 manifest 路径存在 |
 | Unit / Tiny / Mock validated | 已验证 | CPU-safe unit、真实 Transformers tiny Qwen3/Granite、mock CLI 与 schema 回归测试覆盖 |
-| Real 8B validated | **Pending / Not yet validated** | 尚无本仓库记录的三模型真实 8B GPU 完整验证 |
+| Real 8B Direct Pilot validated | **小样本链路已验证** | 三模型已有真实 GPU 生成与隔离 CPU 评测 Pilot；未验证完整 839 题或剪枝后 8B 能力 |
 | Full benchmark / formal experiment completed | **Pending / Not yet completed** | 尚无本仓库正式完整 Direct 或 Agent benchmark 结果 |
 
 配置中的公开 resolved rate 位于 `upstream_reference_result.upstream_reported_resolved_rate`，并明确标记 `reproduced_by_this_repository: false`；它们只是上游参考，不是本仓库复现结果。
@@ -78,6 +78,8 @@ cat /data/results/humaneval/klear_agentforge_8b/magnitude_s030/smoke/evaluation.
 ```
 
 `--limit` 只用于 smoke；正式实验必须运行完整 pinned task set。generation 与 evaluate 是两个独立 phase。
+
+上面 `--sparsity 0.3` 仅为历史命令示例，不是正式研究配置。正式剪枝请求率是 0.1，且需逐方法真实 8B 验证后另行启动。Direct Benchmark 的当前 Pilot 属于 SRTP 自定义 prompt/提取协议的链路验证，不等同官方 leaderboard 成绩；正式全量 Direct 尚未运行。
 
 ## Repository map
 

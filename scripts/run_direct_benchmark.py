@@ -24,7 +24,9 @@ if str(REPOSITORY_ROOT) not in sys.path:
 from src.direct_evaluation import (  # noqa: E402
     get_benchmark, list_benchmarks, load_evaluation_profile, task_id_hash,
 )
-from src.direct_evaluation.generation import generate_one  # noqa: E402
+from src.direct_evaluation.generation import (  # noqa: E402
+    DECODE_PROTOCOL, TOKENIZER_INPUT_PROTOCOL, generate_one,
+)
 from src.analysis import checkpoint_size_bytes  # noqa: E402
 from src.models import LoadOptions, get_model_adapter, list_model_ids, load_model_spec  # noqa: E402
 from src.artifacts import ARTIFACT_MANIFEST_NAME, load_model_artifact, resolve_model_artifact  # noqa: E402
@@ -147,6 +149,15 @@ def _source_dirty() -> bool | None:
         return None
 
 
+def _source_archive_sha256() -> str | None:
+    value = os.environ.get("SRTP_SOURCE_ARCHIVE_SHA256")
+    if value is None:
+        return None
+    if re.fullmatch(r"[0-9a-f]{64}", value) is None:
+        raise ValueError("SRTP_SOURCE_ARCHIVE_SHA256 must be a lowercase SHA256")
+    return value
+
+
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -208,7 +219,12 @@ def _validate_identity(
         "benchmark": args.benchmark, "project_model_id": args.model,
         "artifact_kind": args.artifact_kind, "artifact_label": args.artifact_label,
         "prompt_protocol": benchmark.spec.prompt_protocol,
+        "code_extraction_protocol": benchmark.spec.code_extraction_protocol,
+        "tokenizer_input_protocol": TOKENIZER_INPUT_PROTOCOL,
+        "decode_protocol": DECODE_PROTOCOL,
         "evaluation_profile_id": profile.profile_id,
+        "evaluation_profile_version": profile.profile_version,
+        "record_schema_version": 4,
     }
     for key, value in expected.items():
         if record.get(key) != value:
@@ -232,6 +248,11 @@ def generate(args: argparse.Namespace, run_dir: Path, benchmark: Any, tasks: lis
         benchmark_id=args.benchmark,
         benchmark_source_revision=benchmark.spec.source_revision,
         benchmark_metadata_sha256=canonical_sha256(benchmark.spec.metadata),
+        prompt_protocol=benchmark.spec.prompt_protocol,
+        code_extraction_protocol=benchmark.spec.code_extraction_protocol,
+        tokenizer_input_protocol=TOKENIZER_INPUT_PROTOCOL,
+        decode_protocol=DECODE_PROTOCOL,
+        source_archive_sha256=_source_archive_sha256(),
         task_id_hash=task_id_hash(tasks),
         evaluation_profile=profile.to_dict(),
     )
@@ -271,12 +292,18 @@ def generate(args: argparse.Namespace, run_dir: Path, benchmark: Any, tasks: lis
                     "trial_index": trial, "seed": seed, "project_model_id": args.model,
                     "artifact_kind": args.artifact_kind, "artifact_label": args.artifact_label,
                     "prompt_protocol": benchmark.spec.prompt_protocol,
+                    "code_extraction_protocol": benchmark.spec.code_extraction_protocol,
+                    "tokenizer_input_protocol": TOKENIZER_INPUT_PROTOCOL,
+                    "decode_protocol": DECODE_PROTOCOL,
                     "evaluation_profile_id": profile.profile_id,
+                    "evaluation_profile_version": profile.profile_version,
+                    "record_schema_version": 4,
                     "resume_identity_sha256": resume_identity["sha256"],
                     **generated, "raw_generation": raw,
                     "processed_generation": benchmark.postprocess_generation(raw),
                     "generation_success": True, "error": None,
                 }
+                record["final_answer_complete"] = bool(record["processed_generation"])
             except Exception as error:
                 prompt = benchmark.build_prompt(task)
                 record = {
@@ -284,11 +311,18 @@ def generate(args: argparse.Namespace, run_dir: Path, benchmark: Any, tasks: lis
                     "trial_index": trial, "seed": seed, "project_model_id": args.model,
                     "artifact_kind": args.artifact_kind, "artifact_label": args.artifact_label,
                     "prompt_protocol": benchmark.spec.prompt_protocol,
+                    "code_extraction_protocol": benchmark.spec.code_extraction_protocol,
+                    "tokenizer_input_protocol": TOKENIZER_INPUT_PROTOCOL,
+                    "decode_protocol": DECODE_PROTOCOL,
                     "evaluation_profile_id": profile.profile_id,
+                    "evaluation_profile_version": profile.profile_version,
+                    "record_schema_version": 4,
                     "resume_identity_sha256": resume_identity["sha256"],
                     "prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(),
                     "raw_generation": "", "processed_generation": "",
-                    "generation_success": False, "error": f"{type(error).__name__}: {error}",
+                    "generation_success": False, "final_answer_complete": False,
+                    "finish_reason": "generation_error", "truncated": False,
+                    "error": f"{type(error).__name__}: {error}",
                 }
             by_key[key] = record
             _write_jsonl(run_dir / "generations.jsonl", [by_key[item] for item in ordered_keys if item in by_key])
@@ -303,6 +337,7 @@ def generate(args: argparse.Namespace, run_dir: Path, benchmark: Any, tasks: lis
             per_device_peaks[device] = max(per_device_peaks.get(device, 0), int(value))
     manifest.update({"phase": "generation", "effective_evaluation_profile": profile.to_dict(),
                      "resume_identity": resume_identity,
+                     "generations_sha256": _sha256(run_dir / "generations.jsonl"),
                      "artifact": artifact,
                      "source_generation_config_sha256": artifact.get("generation_config_sha256"),
                      "runtime": {
@@ -326,19 +361,68 @@ def generate(args: argparse.Namespace, run_dir: Path, benchmark: Any, tasks: lis
 def evaluate(args: argparse.Namespace, run_dir: Path, benchmark: Any, tasks: list[Any], full_count: int, profile: Any, overridden: bool) -> None:
     generations_path = run_dir / "generations.jsonl"
     records = _read_jsonl(generations_path)
+    generated_manifest_path = run_dir / "generation_manifest.json"
+    if not generated_manifest_path.is_file():
+        raise ValueError("Generation manifest is required for protocol verification")
+    generated_manifest = json.loads(generated_manifest_path.read_text(encoding="utf-8"))
+    if generated_manifest.get("schema_version") != 4:
+        raise ValueError("Generation manifest schema mismatch")
+    for field, expected in (("prompt_protocol", benchmark.spec.prompt_protocol),
+                            ("code_extraction_protocol", benchmark.spec.code_extraction_protocol),
+                            ("tokenizer_input_protocol", TOKENIZER_INPUT_PROTOCOL),
+                            ("decode_protocol", DECODE_PROTOCOL),
+                            ("evaluation_profile_id", profile.profile_id),
+                            ("evaluation_profile_version", profile.profile_version),
+                            ("effective_evaluation_profile", profile.to_dict()),
+                            ("benchmark_source_revision", benchmark.spec.source_revision),
+                            ("benchmark_metadata", dict(benchmark.spec.metadata)),
+                            ("task_id_hash", task_id_hash(tasks)),
+                            ("task_ids", [task.task_id for task in tasks]),
+                            ("source_archive_sha256", _source_archive_sha256())):
+        if generated_manifest.get(field) != expected:
+            raise ValueError(f"Generation manifest protocol mismatch: {field}")
+    resume_identity = generated_manifest.get("resume_identity")
+    if (not isinstance(resume_identity, dict) or
+            resume_identity.get("sha256") != canonical_sha256(resume_identity.get("fields"))):
+        raise ValueError("Generation resume identity hash mismatch")
+    resume_fields = resume_identity["fields"]
+    for field, expected in (("benchmark_id", args.benchmark),
+                            ("benchmark_source_revision", benchmark.spec.source_revision),
+                            ("benchmark_metadata_sha256", canonical_sha256(benchmark.spec.metadata)),
+                            ("task_id_hash", task_id_hash(tasks)),
+                            ("prompt_protocol", benchmark.spec.prompt_protocol),
+                            ("code_extraction_protocol", benchmark.spec.code_extraction_protocol),
+                            ("tokenizer_input_protocol", TOKENIZER_INPUT_PROTOCOL),
+                            ("decode_protocol", DECODE_PROTOCOL),
+                            ("source_archive_sha256", _source_archive_sha256()),
+                            ("evaluation_profile", profile.to_dict())):
+        if resume_fields.get(field) != expected:
+            raise ValueError(f"Generation resume identity mismatch: {field}")
+    if generated_manifest.get("generations_sha256") != _sha256(generations_path):
+        raise ValueError("Generation file hash mismatch")
     expected_keys = {(task.task_id, trial) for task in tasks for trial in range(profile.num_trials)}
     found = [_record_key(record) for record in records]
     if len(found) != len(set(found)) or set(found) != expected_keys:
         raise ValueError("Generation identities must exactly match every (task_id, trial_index)")
     required = {"benchmark", "task_id", "trial_index", "seed", "project_model_id",
                 "artifact_kind", "artifact_label", "prompt_protocol", "evaluation_profile_id",
-                "prompt_sha256", "raw_generation", "processed_generation", "generation_success", "error"}
+                "code_extraction_protocol", "prompt_sha256", "raw_generation", "processed_generation",
+                "generation_success", "final_answer_complete", "finish_reason", "error",
+                "tokenizer_input_protocol", "decode_protocol", "evaluation_profile_version",
+                "record_schema_version", "resume_identity_sha256"}
     for record in records:
         if required.difference(record):
             raise ValueError(f"Generation record is missing fields: {sorted(required.difference(record))}")
-        _validate_identity(record, args, benchmark, profile)
+        _validate_identity(record, args, benchmark, profile, resume_identity)
         if record["seed"] != record["trial_index"]:
             raise ValueError("Generation seed schedule must equal trial_index")
+        if record["processed_generation"] != benchmark.postprocess_generation(record["raw_generation"]):
+            raise ValueError("Processed generation does not match current extraction protocol")
+        if record["final_answer_complete"] != bool(record["processed_generation"]):
+            raise ValueError("Final answer status mismatch")
+        if record["generation_success"] and record.get("prompt") is not None:
+            if hashlib.sha256(record["prompt"].encode("utf-8")).hexdigest() != record["prompt_sha256"]:
+                raise ValueError("Rendered prompt hash mismatch")
     by_key = {_record_key(record): record for record in records}
     outcomes: list[dict[str, Any]] = []
     for trial in range(profile.num_trials):
@@ -346,6 +430,8 @@ def evaluate(args: argparse.Namespace, run_dir: Path, benchmark: Any, tasks: lis
             record = by_key[(task.task_id, trial)]
             if not record["generation_success"]:
                 outcome = {"task_id": task.task_id, "passed": False, "status": "generation_error", "error": record["error"]}
+            elif not record["final_answer_complete"]:
+                outcome = {"task_id": task.task_id, "passed": False, "status": "protocol_failure", "error": "no complete extractable code"}
             else:
                 outcome = vars(benchmark.evaluate(task, record["processed_generation"], timeout=args.timeout))
             outcomes.append({
@@ -356,6 +442,8 @@ def evaluate(args: argparse.Namespace, run_dir: Path, benchmark: Any, tasks: lis
                 "evaluation_profile_id": record["evaluation_profile_id"],
                 "prompt_sha256": record["prompt_sha256"],
                 "generation_success": bool(record["generation_success"]),
+                "finish_reason": record["finish_reason"],
+                "final_answer_complete": record["final_answer_complete"],
                 "trial_index": trial,
                 **outcome,
             })
@@ -371,6 +459,7 @@ def evaluate(args: argparse.Namespace, run_dir: Path, benchmark: Any, tasks: lis
         "attempted": len(outcomes), "passed": passed, "failed": len(outcomes) - passed,
         "timeouts": sum(row["status"] == "timeout" for row in outcomes),
         "execution_errors": sum(row["status"] == "execution_error" for row in outcomes),
+        "protocol_failures": sum(row["status"] == "protocol_failure" for row in outcomes),
         "per_trial_pass_at_1": trial_scores,
         "pass_at_1_mean": statistics.fmean(trial_scores) if trial_scores else 0.0,
         "pass_at_1_std": statistics.pstdev(trial_scores) if len(trial_scores) > 1 else 0.0,
@@ -379,8 +468,6 @@ def evaluate(args: argparse.Namespace, run_dir: Path, benchmark: Any, tasks: lis
     _write_jsonl(run_dir / "outcomes.jsonl", outcomes)
     _write_jsonl(run_dir / "errors.jsonl", [row for row in outcomes if not row["passed"]])
     manifest = _manifest_base(args, benchmark, tasks, full_count, profile, overridden)
-    generated_manifest_path = run_dir / "generation_manifest.json"
-    generated_manifest = json.loads(generated_manifest_path.read_text()) if generated_manifest_path.is_file() else {}
     manifest.update({
         "phase": "evaluation", "effective_evaluation_profile": profile.to_dict(),
         "evaluator": {
@@ -398,8 +485,9 @@ def evaluate(args: argparse.Namespace, run_dir: Path, benchmark: Any, tasks: lis
 
 def _manifest_base(args: argparse.Namespace, benchmark: Any, tasks: list[Any], full_count: int, profile: Any, overridden: bool) -> dict[str, Any]:
     return {
-        "schema_version": 3, "created_at": datetime.now(timezone.utc).isoformat(),
+        "schema_version": 4, "created_at": datetime.now(timezone.utc).isoformat(),
         "project_git_commit": _git_commit(), "source_dirty": _source_dirty(),
+        "source_archive_sha256": _source_archive_sha256(),
         "image_metadata": {"image": os.environ.get("SRTP_IMAGE"), "image_digest": os.environ.get("SRTP_IMAGE_DIGEST")},
         "versions": _versions(), "benchmark": args.benchmark,
         "benchmark_source_revision": benchmark.spec.source_revision,
@@ -408,6 +496,8 @@ def _manifest_base(args: argparse.Namespace, benchmark: Any, tasks: list[Any], f
         "task_id_hash": task_id_hash(tasks), "full_task_count_before_limit": full_count,
         "limited_run": args.limit is not None, "prompt_protocol": benchmark.spec.prompt_protocol,
         "code_extraction_protocol": benchmark.spec.code_extraction_protocol,
+        "tokenizer_input_protocol": TOKENIZER_INPUT_PROTOCOL,
+        "decode_protocol": DECODE_PROTOCOL,
         "metric": "pass@1", "project_model_id": args.model,
         "evaluation_profile_id": profile.profile_id, "evaluation_profile_version": profile.profile_version,
         "protocol_override": overridden, "num_trials": profile.num_trials,

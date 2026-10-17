@@ -9,4 +9,4 @@
 - Local runtime path: `/data/datasets/livecodebench/v6/test6.jsonl`; it is read directly and is independent of the `datasets` package.
 - Vendored minimal evaluator: `src/direct_evaluation/vendor/livecodebench/testing_util.py`, adapted from the pinned MIT source. Project wrappers add process isolation/status mapping; the full hash is checked before private pickle decoding.
 - Prompt/chat adaptation preserves the pinned generic system/user content. Extraction uses the final fenced block and returns empty when no complete fence exists.
-- Project generation uses model-by-benchmark profiles and repeated pass@1 trials. Default is one trial; it is not equivalent to leaderboard/model-card repeated-sampling scores.
+- Project generation uses model-by-benchmark profiles and one fixed-seed pass@1 trial by default; this is not equivalent to leaderboard/model-card repeated-sampling scores. Limited real 8B Pilot and isolated CPU evaluate are validated; full 175-task formal baseline remains pending.

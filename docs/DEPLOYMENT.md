@@ -11,7 +11,7 @@
 
 ### SRTP 阶段
 
-目标是完成两个已接入 8B 模型、四种剪枝方法和三项代码生成 benchmark。
+目标是完成三个已接入 8B 模型、Magnitude/Wanda/SparseGPT/SLEB/TaBP（SSN 与 DDF 两个条件）和三项代码生成 benchmark。当前仅完成真实模型 Direct 小样本链路验证，完整基线与剪枝实验尚未启动。
 
 推荐配置：
 
@@ -141,7 +141,7 @@ python3 scripts/setup/verify_assets.py --root /data/datasets
 
 ## 实验运行
 
-剪枝示例：
+剪枝命令格式示例（`0.3` 是历史演示值，正式研究请求剪枝率为 `0.1`；不得直接将本示例作为正式任务启动）：
 
 ```bash
 python3 scripts/run_pruning.py \

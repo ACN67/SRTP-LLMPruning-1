@@ -10,6 +10,10 @@ from typing import Any, Mapping, Sequence
 from .profiles import EvaluationProfile
 
 
+TOKENIZER_INPUT_PROTOCOL = "rendered_chat_token_ids_v1"
+DECODE_PROTOCOL = "skip_special_tokens_true_v1"
+
+
 def _seed_everything(seed: int) -> None:
     random.seed(seed)
     try:
@@ -34,6 +38,20 @@ def _generation_value(model: Any, name: str, default: Any = None) -> Any:
     generation_config = getattr(model, "generation_config", None)
     value = getattr(generation_config, name, None) if generation_config is not None else None
     return default if value is None else value
+
+
+def _finish_status(generated: Any, eos_token_id: Any, max_new_tokens: int) -> tuple[str, bool]:
+    """Infer a stop reason from the actual returned token IDs, conservatively."""
+    ids = generated.tolist()
+    if not ids:
+        return "unknown", False
+    eos_ids = (eos_token_id if isinstance(eos_token_id, (list, tuple, set))
+               else [eos_token_id])
+    if ids[-1] in {int(value) for value in eos_ids if value is not None}:
+        return "eos", False
+    if len(ids) >= max_new_tokens:
+        return "length", True
+    return "unknown", False
 
 
 def _cuda_devices(model: Any, torch: Any) -> tuple[Any, ...]:
@@ -77,7 +95,8 @@ def generate_one(
             list(messages), tokenize=False, add_generation_prompt=True,
             **dict(profile.chat_template_kwargs),
         )
-    encoded = tokenizer(rendered_prompt, return_tensors="pt", truncation=False)
+    encoded = tokenizer(rendered_prompt, return_tensors="pt", truncation=False,
+                        add_special_tokens=not profile.use_chat_template)
     input_ids = encoded["input_ids"]
     model_limit = getattr(model.config, "max_position_embeddings", None)
     if model_limit is not None and input_ids.shape[-1] + profile.max_new_tokens > model_limit:
@@ -132,6 +151,7 @@ def generate_one(
     generated = output[0, prompt_tokens:]
     raw = tokenizer.decode(generated, skip_special_tokens=True)
     generated_tokens = int(generated.numel())
+    finish_reason, truncated = _finish_status(generated, effective_eos, profile.max_new_tokens)
     return {
         "prompt": rendered_prompt,
         "prompt_sha256": hashlib.sha256(rendered_prompt.encode("utf-8")).hexdigest(),
@@ -144,9 +164,12 @@ def generate_one(
         "peak_cuda_vram_max_device_bytes": (
             max(peak_cuda_vram_per_device.values()) if peak_cuda_vram_per_device else None
         ),
-        "truncated": False,
+        "truncated": truncated,
+        "finish_reason": finish_reason,
         "seed": seed,
         "chat_template_used": profile.use_chat_template,
+        "tokenizer_input_protocol": TOKENIZER_INPUT_PROTOCOL,
+        "decode_protocol": DECODE_PROTOCOL,
         "chat_template_kwargs": dict(profile.chat_template_kwargs),
         "effective_generation_config": {
             **kwargs,

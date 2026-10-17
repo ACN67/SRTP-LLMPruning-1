@@ -11,6 +11,6 @@ prompt_reference_revision: 26d6d00bb1fd0fa37f39c99d5290da67891d1c5e
 expected_task_count: 500
 task_id_range: [11, 510]
 metric: pass@1
-prompt_protocol: mbpp_prompt_v1
-code_extraction_protocol: code_extraction_v1
+prompt_protocol: mbpp_prompt_v2_final_code
+code_extraction_protocol: python_static_extraction_v2
 dataset_path: /data/datasets/mbpp/mbpp.jsonl

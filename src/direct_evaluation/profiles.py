@@ -75,7 +75,7 @@ def load_evaluation_profile(
     return EvaluationProfile(
         project_model_id=project_model_id,
         benchmark=benchmark,
-        profile_version=int(raw["profile_version"]),
-        source=str(raw["source"]),
+        profile_version=int(values.pop("profile_version", raw["profile_version"])),
+        source=str(values.pop("source", raw["source"])),
         **values,
     )

@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import pickle
 import tempfile
 import unittest
 import zlib
 from pathlib import Path
+from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -17,7 +19,7 @@ from transformers import Qwen3Config, Qwen3ForCausalLM
 
 from src.direct_evaluation import BenchmarkSpec, BenchmarkTask, list_benchmarks, load_evaluation_profile
 from src.direct_evaluation.benchmarks import HumanEvalBenchmark, LiveCodeBenchBenchmark, MBPPBenchmark
-from src.direct_evaluation.generation import _cuda_devices, generate_one
+from src.direct_evaluation.generation import _cuda_devices, _finish_status, generate_one
 from src.direct_evaluation.lcb_protocol import (
     FORMAT_WITHOUT_STARTER, SYSTEM_MESSAGE_GENERIC, chat_messages, decode_test_cases,
     extract_lcb_code, generic_question_prompt, load_verified_v6,
@@ -30,6 +32,31 @@ def spec(name):
 
 
 class EvaluatorTests(unittest.TestCase):
+    def test_real_old_mbpp_12_raw_regression(self):
+        path = Path(__file__).parent / "fixtures" / "old_swe_lego_mbpp_12_raw.txt"
+        raw = path.read_text(encoding="utf-8")
+        self.assertEqual(hashlib.sha256(raw.encode()).hexdigest(),
+                         "d33e816fddbe19549dd39dae00a8064b0758a8f1a9d57b3eac83bc8efe030e5f")
+        result = MBPPBenchmark(spec("mbpp")).postprocess_generation(raw)
+        self.assertTrue(result.startswith("def sort_matrix(matrix):"))
+        self.assertNotIn("\nTest passed!", result)
+
+    def test_python_extraction_prefers_code_over_stdout_and_rejects_reasoning(self):
+        benchmark = MBPPBenchmark(spec("mbpp"))
+        self.assertEqual(benchmark.postprocess_generation(
+            "```python\ndef sort_matrix(matrix):\n    return sorted(matrix, key=sum)\n```\n"
+            "```output\nTest passed!\n```\n````".replace("````", "")),
+            "def sort_matrix(matrix):\n    return sorted(matrix, key=sum)")
+        self.assertEqual(benchmark.postprocess_generation(
+            "```python\ndef f(): return 1\n```\n```\n[1, 2, 3]\n```"),
+            "def f(): return 1")
+        self.assertEqual(benchmark.postprocess_generation("<think>unfinished reasoning"), "")
+        self.assertEqual(benchmark.postprocess_generation("We need to write a function."), "")
+        self.assertEqual(benchmark.postprocess_generation("```text\ndef f(): return 1\n```"), "")
+        self.assertEqual(benchmark.postprocess_generation("```py\ndef f(): return 1\n```"), "def f(): return 1")
+        self.assertEqual(benchmark.postprocess_generation("```python\ndef f(): return 1"), "def f(): return 1")
+        self.assertEqual(benchmark.postprocess_generation("    return a + b"), "    return a + b")
+
     def test_registry_has_only_three_full_benchmarks(self):
         self.assertEqual(list_benchmarks(), ("humaneval", "livecodebench", "mbpp"))
 
@@ -58,7 +85,7 @@ class EvaluatorTests(unittest.TestCase):
         })
         self.assertTrue(benchmark.evaluate(task, "def root(x): return math.isqrt(x)").passed)
         self.assertFalse(benchmark.evaluate(task, "def root(x): return x").passed)
-        self.assertEqual(benchmark.build_prompt(task), '"""\ninteger square root\nassert root(10) == EXPECTED\n"""\n')
+        self.assertIn('"""\ninteger square root\nassert root(10) == EXPECTED\n"""\n', benchmark.build_prompt(task))
 
     def test_mbpp_setup_can_instantiate_candidate_class(self):
         benchmark = MBPPBenchmark(spec("mbpp"))
@@ -131,15 +158,38 @@ class LCBProtocolTests(unittest.TestCase):
 
 
 class ProfileTests(unittest.TestCase):
-    def test_humaneval_and_mbpp_are_greedy_single_trial(self):
+    def test_he_source_override_does_not_change_lcb_profile(self):
+        expected = {
+            "klear_agentforge_8b": ("klear_lcb_v6_sampling_chat_v2", 2,
+                                     "pinned model generation_config plus SRTP benchmark choices"),
+            "granite_4_2_8b": ("granite_lcb_v6_thinking_sampling_chat_v2", 2,
+                                "pinned model generation_config and official Granite thinking guidance"),
+            "swe_lego_qwen3_8b": ("swe_lego_lcb_v6_sampling_nothink_chat_v1", 1,
+                                   "pinned SWE-Lego generation_config, no-think SFT template, and SRTP direct benchmark policy"),
+        }
+        for model, identity in expected.items():
+            lcb = load_evaluation_profile(model, "livecodebench")
+            self.assertEqual((lcb.profile_id, lcb.profile_version, lcb.source), identity)
+            self.assertNotEqual(load_evaluation_profile(model, "humaneval").source, lcb.source)
+
+    def test_humaneval_and_mbpp_use_pinned_sampling_single_trial(self):
         for model in (
             "klear_agentforge_8b", "granite_4_2_8b", "swe_lego_qwen3_8b"
         ):
             for benchmark in ("humaneval", "mbpp"):
                 profile = load_evaluation_profile(model, benchmark)
-                self.assertFalse(profile.do_sample)
+                self.assertTrue(profile.do_sample)
                 self.assertTrue(profile.use_chat_template)
                 self.assertEqual(profile.num_trials, 1)
+                if model == "granite_4_2_8b":
+                    self.assertEqual((profile.temperature, profile.top_p, profile.top_k,
+                                      profile.max_new_tokens), (1.0, 0.95, None, 2048))
+                elif model == "klear_agentforge_8b":
+                    self.assertEqual((profile.temperature, profile.top_p, profile.top_k,
+                                      profile.max_new_tokens), (0.6, 0.95, 20, 4096))
+                else:
+                    self.assertEqual((profile.temperature, profile.top_p, profile.top_k,
+                                      profile.max_new_tokens), (0.6, 0.95, 20, 512))
 
     def test_klear_lcb_sampling_profile(self):
         profile = load_evaluation_profile("klear_agentforge_8b", "livecodebench")
@@ -156,7 +206,7 @@ class ProfileTests(unittest.TestCase):
     def test_swe_lego_direct_profiles_use_nothink_and_pinned_sampling(self):
         for benchmark in ("humaneval", "mbpp"):
             profile = load_evaluation_profile("swe_lego_qwen3_8b", benchmark)
-            self.assertFalse(profile.do_sample)
+            self.assertTrue(profile.do_sample)
             self.assertEqual(profile.chat_template_kwargs, {"enable_thinking": False})
         profile = load_evaluation_profile("swe_lego_qwen3_8b", "livecodebench")
         self.assertEqual(
@@ -169,7 +219,7 @@ class ProfileTests(unittest.TestCase):
 class TinyTokenizer:
     eos_token_id = 0
     pad_token_id = None
-    def __call__(self, text, return_tensors, truncation=False):
+    def __call__(self, text, return_tensors, truncation=False, add_special_tokens=True):
         return {"input_ids": torch.tensor([[1, 2, 3]]), "attention_mask": torch.ones(1, 3, dtype=torch.long)}
     def decode(self, tokens, skip_special_tokens=True):
         return "generated"
@@ -194,6 +244,30 @@ class RecordingModel:
 
 
 class TinyGenerationTests(unittest.TestCase):
+    def test_final_direct_sampling_kwargs_and_greedy_absence(self):
+        for model_id in ("klear_agentforge_8b", "swe_lego_qwen3_8b", "granite_4_2_8b"):
+            profile = load_evaluation_profile(model_id, "humaneval")
+            profile, _ = profile.with_overrides(max_new_tokens=2)
+            model = RecordingModel(eos_token_id=9, pad_token_id=9)
+            generate_one(model, TinyTokenizer(), "prompt", messages=[{"role": "user", "content": "prompt"}],
+                         profile=profile, seed=0)
+            self.assertTrue(model.kwargs["do_sample"])
+            self.assertEqual(model.kwargs["temperature"], profile.temperature)
+            self.assertEqual(model.kwargs["top_p"], profile.top_p)
+            self.assertEqual(model.kwargs["top_k"], profile.top_k if profile.top_k is not None else 50)
+            greedy = replace(profile, do_sample=False, temperature=None, top_p=None, top_k=None)
+            generate_one(model, TinyTokenizer(), "prompt", messages=[{"role": "user", "content": "prompt"}],
+                         profile=greedy, seed=0)
+            self.assertFalse(model.kwargs["do_sample"])
+            for key in ("temperature", "top_p", "top_k"):
+                self.assertNotIn(key, model.kwargs)
+
+    def test_stop_reason_boundaries(self):
+        self.assertEqual(_finish_status(torch.tensor([3, 9]), [8, 9], 2), ("eos", False))
+        self.assertEqual(_finish_status(torch.tensor([3, 4]), [8, 9], 2), ("length", True))
+        self.assertEqual(_finish_status(torch.tensor([3]), 9, 2), ("unknown", False))
+        self.assertEqual(_finish_status(torch.tensor([], dtype=torch.long), 9, 2), ("unknown", False))
+
     def test_multi_gpu_device_map_accepts_integer_devices_and_deduplicates(self):
         model = SimpleNamespace(hf_device_map={"a": 0, "b": 1, "c": 0, "d": "cpu"})
         self.assertEqual(
@@ -223,7 +297,7 @@ class TinyGenerationTests(unittest.TestCase):
         self.assertTrue(result["chat_template_used"])
         effective = result["effective_generation_config"]
         self.assertEqual((effective["temperature"], effective["top_p"], effective["top_k"]),
-                         (None, None, None))
+                         (0.6, 0.95, 20))
 
     def test_sampling_effective_config_records_profile_and_model_stop_policy(self):
         cases = (

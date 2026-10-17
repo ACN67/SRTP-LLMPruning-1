@@ -11,5 +11,5 @@ expected_task_count: 164
 task_id_range: null
 metric: pass@1
 prompt_protocol: human_eval_prompt_v1
-code_extraction_protocol: code_extraction_v1
+code_extraction_protocol: python_static_extraction_v2
 dataset_path: /data/datasets/humaneval/HumanEval.jsonl.gz

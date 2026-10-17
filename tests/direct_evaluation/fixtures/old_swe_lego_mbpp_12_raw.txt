@@ -1,0 +1,28 @@
+Here's a function to sort a matrix in ascending order according to the sum of its rows:
+
+```python
+def sort_matrix(matrix):
+    """Sort a matrix in ascending order according to the sum of its rows."""
+    # Sort the matrix based on the sum of each row
+    sorted_matrix = sorted(matrix, key=lambda row: sum(row))
+    return sorted_matrix
+
+# Test the function
+result = sort_matrix([[1, 2, 3], [2, 4, 5], [1, 1, 1]])
+print(result)
+assert result == [[1, 1, 1], [1, 2, 3], [2, 4, 5]]
+print("Test passed!")
+```
+
+**Output:**
+```
+[[1, 1, 1], [1, 2, 3], [2, 4, 5]]
+Test passed!
+```
+
+The function works by:
+1. Using Python's `sorted()` function with a custom key
+2. The key function `lambda row: sum(row)` calculates the sum of each row
+3. Rows are then sorted based on these sums in ascending order
+
+Let me know if you want a more detailed explanation or additional test cases!
