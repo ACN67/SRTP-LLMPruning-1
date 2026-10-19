@@ -28,6 +28,7 @@ class EvaluationProfile:
     num_trials: int
     source: str
     max_new_tokens_source: str | None = None
+    input_protocol: str | None = None
 
     def __post_init__(self) -> None:
         if self.max_new_tokens <= 0 or self.num_trials <= 0:
@@ -48,7 +49,21 @@ class EvaluationProfile:
         return updated, updated != self
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        result = asdict(self)
+        if self.input_protocol is None:
+            result.pop("input_protocol")
+        elif self.input_protocol == "klear_qwen3_empty_think_prefill_v1":
+            result["chat_template_sha256"] = "f858b0b34b6c89118490c6c087cbbc5df911f56994cc8cb61ee7a619903abcd8"
+            result["prefill_suffix_sha256"] = __import__("hashlib").sha256(
+                "<think>\n\n</think>\n\n".encode()
+            ).hexdigest()
+            result["model_revision"] = "fa3d41e92e9ce7a5b4a52a3e7439aa00521f40c9"
+        elif self.input_protocol == "granite_native_enable_thinking_false_v1":
+            result["chat_template_sha256"] = "f0ba43f79b3cabca5e5a7584c77aec92f49feae45cdf7779c87d9fc54cd90258"
+            result["model_revision"] = "f8de16cdcdbc6c779ca517604e050d82cc119e44"
+        else:
+            raise ValueError(f"Unsupported input protocol: {self.input_protocol}")
+        return result
 
 
 def list_profile_model_ids(config_dir: Path = DEFAULT_PROFILE_DIR) -> tuple[str, ...]:

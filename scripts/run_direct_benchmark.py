@@ -27,6 +27,7 @@ from src.direct_evaluation import (  # noqa: E402
 from src.direct_evaluation.generation import (  # noqa: E402
     DECODE_PROTOCOL, TOKENIZER_INPUT_PROTOCOL, generate_one,
 )
+from src.direct_evaluation.base import BenchmarkTask  # noqa: E402
 from src.analysis import checkpoint_size_bytes  # noqa: E402
 from src.models import LoadOptions, get_model_adapter, list_model_ids, load_model_spec  # noqa: E402
 from src.artifacts import ARTIFACT_MANIFEST_NAME, load_model_artifact, resolve_model_artifact  # noqa: E402
@@ -63,7 +64,19 @@ def _parser() -> argparse.ArgumentParser:
     output.add_argument("--overwrite", action="store_true")
     parser.add_argument("--timeout", type=float, default=3.0)
     parser.add_argument("--allow-unverified-model", action="store_true")
+    parser.add_argument("--profile-dir", type=Path)
+    parser.add_argument("--selection-plan", type=Path)
+    parser.add_argument("--selection-count", type=int)
     return parser
+
+
+def _input_protocol(profile: Any) -> str:
+    return getattr(profile, "input_protocol", None) or TOKENIZER_INPUT_PROTOCOL
+
+
+def _selection_sha(args: argparse.Namespace) -> str | None:
+    plan = getattr(args, "selection_plan", None)
+    return _sha256(plan) if plan is not None else None
 
 
 def _run_directory(args: argparse.Namespace) -> Path:
@@ -198,6 +211,52 @@ def _pruning_provenance(artifact: dict[str, Any]) -> list[dict[str, Any]] | None
 
 
 def _selected_tasks(args: argparse.Namespace, benchmark: Any) -> tuple[list[Any], int]:
+    if args.selection_plan is not None:
+        expected_plans = {
+            "klear_agentforge_8b": "a8bf176074515bc1d00e4b83f2597b4b5a3a8540a520f0971ad59c9ccee9eca9",
+            "granite_4_2_8b": "448c35b630cb9276f7b0c7f28b7243e77ad34a2001eafc022968ce0ecd8b93a5",
+        }
+        if args.model not in expected_plans or _selection_sha(args) != expected_plans[args.model]:
+            raise ValueError("Pinned Pilot selection plan SHA256 mismatch")
+        if args.limit is not None:
+            raise ValueError("Selection plan cannot be combined with --limit")
+        plan = json.loads(args.selection_plan.read_text(encoding="utf-8"))
+        if args.model == "klear_agentforge_8b":
+            if plan.get("protocol") != "klear_nothink_selection_v1":
+                raise ValueError("Klear selection protocol mismatch")
+            choice = plan["benchmarks"][args.benchmark]
+        else:
+            if args.benchmark != "livecodebench" or plan.get("protocol") != "granite_lcb_nothink_selection_v1":
+                raise ValueError("Granite selection protocol mismatch")
+            choice = plan
+        dataset = Path(choice["dataset_path"])
+        if dataset.resolve() != Path(benchmark.spec.dataset_path).resolve() or _sha256(dataset) != choice["dataset_sha256"]:
+            raise ValueError("Selection dataset path or SHA256 mismatch")
+        if args.benchmark == "mbpp":
+            with dataset.open(encoding="utf-8") as handle:
+                rows = [json.loads(line) for line in handle if line.strip()]
+            all_tasks = [BenchmarkTask("mbpp", str(row["task_id"]), row["text"], row)
+                         for row in rows if 511 <= int(row["task_id"]) <= 600]
+        else:
+            all_tasks = benchmark.load_tasks()
+        by_id = {task.task_id: task for task in all_tasks}
+        planned = [str(item["task_id"]) for item in choice["tasks"]]
+        if len(planned) != len(set(planned)) or any(task_id not in by_id for task_id in planned):
+            raise ValueError("Selection contains duplicate or missing task IDs")
+        if args.model == "granite_4_2_8b":
+            full_selected = [by_id[task_id] for task_id in planned]
+            if task_id_hash(full_selected) != choice["task_id_hash"]:
+                raise ValueError("Granite task sequence hash mismatch")
+            if any(_sha256_prompt(benchmark.build_prompt(by_id[item["task_id"]])) != item["prompt_sha256"]
+                   for item in choice["tasks"]):
+                raise ValueError("Granite selected prompt changed")
+        if args.selection_count is not None:
+            if not 1 <= args.selection_count <= 2:
+                raise ValueError("Smoke selection count must be 1 or 2")
+            planned = planned[:args.selection_count]
+        return [by_id[task_id] for task_id in planned], len(all_tasks)
+    if args.selection_count is not None:
+        raise ValueError("--selection-count needs --selection-plan")
     tasks = benchmark.load_tasks()
     full_count = len(tasks)
     if args.limit is not None:
@@ -205,6 +264,10 @@ def _selected_tasks(args: argparse.Namespace, benchmark: Any) -> tuple[list[Any]
             raise ValueError("--limit must be positive")
         tasks = tasks[:args.limit]
     return tasks, full_count
+
+
+def _sha256_prompt(prompt: str) -> str:
+    return hashlib.sha256(prompt.encode("utf-8")).hexdigest()
 
 
 def _record_key(record: dict[str, Any]) -> tuple[str, int]:
@@ -220,7 +283,7 @@ def _validate_identity(
         "artifact_kind": args.artifact_kind, "artifact_label": args.artifact_label,
         "prompt_protocol": benchmark.spec.prompt_protocol,
         "code_extraction_protocol": benchmark.spec.code_extraction_protocol,
-        "tokenizer_input_protocol": TOKENIZER_INPUT_PROTOCOL,
+        "tokenizer_input_protocol": _input_protocol(profile),
         "decode_protocol": DECODE_PROTOCOL,
         "evaluation_profile_id": profile.profile_id,
         "evaluation_profile_version": profile.profile_version,
@@ -250,11 +313,12 @@ def generate(args: argparse.Namespace, run_dir: Path, benchmark: Any, tasks: lis
         benchmark_metadata_sha256=canonical_sha256(benchmark.spec.metadata),
         prompt_protocol=benchmark.spec.prompt_protocol,
         code_extraction_protocol=benchmark.spec.code_extraction_protocol,
-        tokenizer_input_protocol=TOKENIZER_INPUT_PROTOCOL,
+        tokenizer_input_protocol=_input_protocol(profile),
         decode_protocol=DECODE_PROTOCOL,
         source_archive_sha256=_source_archive_sha256(),
         task_id_hash=task_id_hash(tasks),
         evaluation_profile=profile.to_dict(),
+        **({"selection_plan_sha256": _selection_sha(args)} if getattr(args, "selection_plan", None) else {}),
     )
     expected_keys = {(task.task_id, trial) for task in tasks for trial in range(profile.num_trials)}
     by_key: dict[tuple[str, int], dict[str, Any]] = {}
@@ -293,7 +357,7 @@ def generate(args: argparse.Namespace, run_dir: Path, benchmark: Any, tasks: lis
                     "artifact_kind": args.artifact_kind, "artifact_label": args.artifact_label,
                     "prompt_protocol": benchmark.spec.prompt_protocol,
                     "code_extraction_protocol": benchmark.spec.code_extraction_protocol,
-                    "tokenizer_input_protocol": TOKENIZER_INPUT_PROTOCOL,
+                    "tokenizer_input_protocol": _input_protocol(profile),
                     "decode_protocol": DECODE_PROTOCOL,
                     "evaluation_profile_id": profile.profile_id,
                     "evaluation_profile_version": profile.profile_version,
@@ -312,7 +376,7 @@ def generate(args: argparse.Namespace, run_dir: Path, benchmark: Any, tasks: lis
                     "artifact_kind": args.artifact_kind, "artifact_label": args.artifact_label,
                     "prompt_protocol": benchmark.spec.prompt_protocol,
                     "code_extraction_protocol": benchmark.spec.code_extraction_protocol,
-                    "tokenizer_input_protocol": TOKENIZER_INPUT_PROTOCOL,
+                    "tokenizer_input_protocol": _input_protocol(profile),
                     "decode_protocol": DECODE_PROTOCOL,
                     "evaluation_profile_id": profile.profile_id,
                     "evaluation_profile_version": profile.profile_version,
@@ -369,7 +433,7 @@ def evaluate(args: argparse.Namespace, run_dir: Path, benchmark: Any, tasks: lis
         raise ValueError("Generation manifest schema mismatch")
     for field, expected in (("prompt_protocol", benchmark.spec.prompt_protocol),
                             ("code_extraction_protocol", benchmark.spec.code_extraction_protocol),
-                            ("tokenizer_input_protocol", TOKENIZER_INPUT_PROTOCOL),
+                            ("tokenizer_input_protocol", _input_protocol(profile)),
                             ("decode_protocol", DECODE_PROTOCOL),
                             ("evaluation_profile_id", profile.profile_id),
                             ("evaluation_profile_version", profile.profile_version),
@@ -392,12 +456,14 @@ def evaluate(args: argparse.Namespace, run_dir: Path, benchmark: Any, tasks: lis
                             ("task_id_hash", task_id_hash(tasks)),
                             ("prompt_protocol", benchmark.spec.prompt_protocol),
                             ("code_extraction_protocol", benchmark.spec.code_extraction_protocol),
-                            ("tokenizer_input_protocol", TOKENIZER_INPUT_PROTOCOL),
+                            ("tokenizer_input_protocol", _input_protocol(profile)),
                             ("decode_protocol", DECODE_PROTOCOL),
                             ("source_archive_sha256", _source_archive_sha256()),
                             ("evaluation_profile", profile.to_dict())):
         if resume_fields.get(field) != expected:
             raise ValueError(f"Generation resume identity mismatch: {field}")
+    if getattr(args, "selection_plan", None) is not None and resume_fields.get("selection_plan_sha256") != _selection_sha(args):
+        raise ValueError("Selection plan changed since generation")
     if generated_manifest.get("generations_sha256") != _sha256(generations_path):
         raise ValueError("Generation file hash mismatch")
     expected_keys = {(task.task_id, trial) for task in tasks for trial in range(profile.num_trials)}
@@ -484,7 +550,7 @@ def evaluate(args: argparse.Namespace, run_dir: Path, benchmark: Any, tasks: lis
 
 
 def _manifest_base(args: argparse.Namespace, benchmark: Any, tasks: list[Any], full_count: int, profile: Any, overridden: bool) -> dict[str, Any]:
-    return {
+    result = {
         "schema_version": 4, "created_at": datetime.now(timezone.utc).isoformat(),
         "project_git_commit": _git_commit(), "source_dirty": _source_dirty(),
         "source_archive_sha256": _source_archive_sha256(),
@@ -496,7 +562,7 @@ def _manifest_base(args: argparse.Namespace, benchmark: Any, tasks: list[Any], f
         "task_id_hash": task_id_hash(tasks), "full_task_count_before_limit": full_count,
         "limited_run": args.limit is not None, "prompt_protocol": benchmark.spec.prompt_protocol,
         "code_extraction_protocol": benchmark.spec.code_extraction_protocol,
-        "tokenizer_input_protocol": TOKENIZER_INPUT_PROTOCOL,
+        "tokenizer_input_protocol": _input_protocol(profile),
         "decode_protocol": DECODE_PROTOCOL,
         "metric": "pass@1", "project_model_id": args.model,
         "evaluation_profile_id": profile.profile_id, "evaluation_profile_version": profile.profile_version,
@@ -508,6 +574,10 @@ def _manifest_base(args: argparse.Namespace, benchmark: Any, tasks: list[Any], f
             "explicit_unverified_opt_in" if args.allow_unverified_model else "verified_dense_or_canonical_artifact_required"
         ),
     }
+    if getattr(args, "selection_plan", None) is not None:
+        result["selection_plan_sha256"] = _selection_sha(args)
+        result["selection_count"] = args.selection_count
+    return result
 
 
 def main() -> int:
@@ -515,9 +585,26 @@ def main() -> int:
     run_dir = _run_directory(args)
     _prepare_directory(run_dir, args)
     benchmark = get_benchmark(args.benchmark)
-    profile, overridden = load_evaluation_profile(args.model, args.benchmark).with_overrides(
+    profile, overridden = load_evaluation_profile(
+        args.model, args.benchmark, args.profile_dir or
+        (REPOSITORY_ROOT / "configs" / "direct_evaluation")
+    ).with_overrides(
         max_new_tokens=args.max_new_tokens, num_trials=args.num_trials,
     )
+    if args.profile_dir is not None:
+        expected_protocol = {
+            "klear_agentforge_8b": "klear_qwen3_empty_think_prefill_v1",
+            "granite_4_2_8b": "granite_native_enable_thinking_false_v1",
+        }.get(args.model)
+        if (profile.input_protocol != expected_protocol or args.selection_plan is None or
+                (args.model == "granite_4_2_8b" and args.benchmark != "livecodebench")):
+            raise ValueError("Alternate profile directory requires a selected Non-Thinking Pilot")
+    if profile.input_protocol is not None:
+        if args.artifact_path is None:
+            raise ValueError("Pinned model path is required")
+        sidecar = json.loads((args.artifact_path / ".srtp_model_source.json").read_text())
+        if profile.to_dict()["model_revision"] not in json.dumps(sidecar):
+            raise ValueError("Pinned model revision mismatch")
     tasks, full_count = _selected_tasks(args, benchmark)
     if args.phase == "generate":
         generate(args, run_dir, benchmark, tasks, full_count, profile, overridden)

@@ -1,0 +1,17 @@
+project_model_id: granite_4_2_8b
+profile_version: 1
+source: pinned IBM Granite 4.2-8B native non-thinking LCB diagnostic pilot
+benchmarks:
+  livecodebench:
+    profile_id: pilot_granite_lcb_native_nothink_v1
+    use_chat_template: true
+    chat_template_kwargs:
+      enable_thinking: false
+    input_protocol: granite_native_enable_thinking_false_v1
+    do_sample: true
+    temperature: 1.0
+    top_p: 0.95
+    top_k: 50
+    max_new_tokens: 2048
+    max_new_tokens_source: IBM native non-thinking recommendation; G2/G3 diagnostic budget overrides
+    num_trials: 1

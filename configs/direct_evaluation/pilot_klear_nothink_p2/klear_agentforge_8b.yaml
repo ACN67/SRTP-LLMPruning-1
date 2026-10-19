@@ -1,0 +1,37 @@
+project_model_id: klear_agentforge_8b
+profile_version: 1
+source: SRTP Qwen3 empty-think prefill pilot; Klear published sampling
+benchmarks:
+  humaneval:
+    profile_id: pilot_klear_nothink_p2_humaneval_v1
+    use_chat_template: true
+    chat_template_kwargs: {}
+    input_protocol: klear_qwen3_empty_think_prefill_v1
+    do_sample: true
+    temperature: 0.6
+    top_p: 0.95
+    top_k: 20
+    max_new_tokens: 1024
+    num_trials: 1
+  mbpp:
+    profile_id: pilot_klear_nothink_p2_mbpp_v1
+    use_chat_template: true
+    chat_template_kwargs: {}
+    input_protocol: klear_qwen3_empty_think_prefill_v1
+    do_sample: true
+    temperature: 0.6
+    top_p: 0.95
+    top_k: 20
+    max_new_tokens: 1024
+    num_trials: 1
+  livecodebench:
+    profile_id: pilot_klear_nothink_p2_livecodebench_v1
+    use_chat_template: true
+    chat_template_kwargs: {}
+    input_protocol: klear_qwen3_empty_think_prefill_v1
+    do_sample: true
+    temperature: 0.6
+    top_p: 0.95
+    top_k: 20
+    max_new_tokens: 4096
+    num_trials: 1

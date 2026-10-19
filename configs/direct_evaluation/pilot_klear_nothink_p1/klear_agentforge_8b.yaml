@@ -1,0 +1,37 @@
+project_model_id: klear_agentforge_8b
+profile_version: 1
+source: SRTP Qwen3 empty-think prefill pilot; Qwen3 official non-thinking sampling
+benchmarks:
+  humaneval:
+    profile_id: pilot_klear_nothink_p1_humaneval_v1
+    use_chat_template: true
+    chat_template_kwargs: {}
+    input_protocol: klear_qwen3_empty_think_prefill_v1
+    do_sample: true
+    temperature: 0.7
+    top_p: 0.8
+    top_k: 20
+    max_new_tokens: 1024
+    num_trials: 1
+  mbpp:
+    profile_id: pilot_klear_nothink_p1_mbpp_v1
+    use_chat_template: true
+    chat_template_kwargs: {}
+    input_protocol: klear_qwen3_empty_think_prefill_v1
+    do_sample: true
+    temperature: 0.7
+    top_p: 0.8
+    top_k: 20
+    max_new_tokens: 1024
+    num_trials: 1
+  livecodebench:
+    profile_id: pilot_klear_nothink_p1_livecodebench_v1
+    use_chat_template: true
+    chat_template_kwargs: {}
+    input_protocol: klear_qwen3_empty_think_prefill_v1
+    do_sample: true
+    temperature: 0.7
+    top_p: 0.8
+    top_k: 20
+    max_new_tokens: 4096
+    num_trials: 1
