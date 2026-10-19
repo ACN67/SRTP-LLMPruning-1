@@ -1,5 +1,7 @@
 # SRTP LLM 剪枝复现与评测
 
+> **2026-10-19 交接更新：** Dense 直接评测的实际进度、冻结协议、AutoDL 成果路径和跨电脑 SSH 接手说明见 [远程交接文档](docs/HANDOFF_2026-10-19.md)。以下“当前验证状态”保留了早期仓库软件验收的描述，不代表最新实验进度；Klear MBPP 尚未进行，剪枝后和 Agent 正式成绩仍未产生。
+
 本仓库研究 8B 代码与软件工程模型在非结构化权重剪枝、结构化 block removal、LoRA recovery、代码生成评测和 Agent benchmark 下的行为。当前接入 Klear-AgentForge-8B、Granite-4.2-8B、SWE-Lego-Qwen3-8B，以及 Magnitude、Wanda、SparseGPT、SLEB、TaBP（SSN / DDF 是 TaBP 内部实验条件）。
 
 仓库提供可审查的软件实现、固定配置、上游 provenance、tiny/mock 回归测试和统一 artifact/manifest 边界；它**不发布任何由本仓库产生的正式 8B pass@1、resolved rate 或 leaderboard 结果**。
