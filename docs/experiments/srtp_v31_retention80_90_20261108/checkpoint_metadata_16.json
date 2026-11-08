@@ -1,0 +1,175 @@
+[
+  {
+    "retention": "90",
+    "model": "granite_4_2_8b",
+    "method": "magnitude",
+    "checkpoint_sha256": "8a26d27853f18a89b20ce930f06659a1e3f2018a46a9a65a034a66ea5c9b7b24",
+    "num_hidden_layers": 40,
+    "removed_layers": [],
+    "actual_parameter_retention": null
+  },
+  {
+    "retention": "90",
+    "model": "granite_4_2_8b",
+    "method": "wanda",
+    "checkpoint_sha256": "2b1c408c8236c689bae3c2f174da96b699579c9a2e9eb7c17e01f09e38d40d63",
+    "num_hidden_layers": 40,
+    "removed_layers": [],
+    "actual_parameter_retention": null
+  },
+  {
+    "retention": "90",
+    "model": "granite_4_2_8b",
+    "method": "sparsegpt",
+    "checkpoint_sha256": "82f9fdd5f181a6776a2d369a0b07ddad4181b88e1d3d6113532e9fa215bc2246",
+    "num_hidden_layers": 40,
+    "removed_layers": [],
+    "actual_parameter_retention": null
+  },
+  {
+    "retention": "90",
+    "model": "granite_4_2_8b",
+    "method": "tabp",
+    "checkpoint_sha256": "55c47334694a8f4c57a5f7888e9273172f8aa467be0d4272c33808fe15b5cc94",
+    "num_hidden_layers": 36,
+    "removed_layers": [
+      23,
+      24,
+      21,
+      26
+    ],
+    "actual_parameter_retention": 0.9093508387358279
+  },
+  {
+    "retention": "90",
+    "model": "swe_lego_qwen3_8b",
+    "method": "magnitude",
+    "checkpoint_sha256": "4e4b147a01f58b27aa5d516c8f614520f785613b7998459cd01d0ff35f8c9693",
+    "num_hidden_layers": 36,
+    "removed_layers": [],
+    "actual_parameter_retention": null
+  },
+  {
+    "retention": "90",
+    "model": "swe_lego_qwen3_8b",
+    "method": "wanda",
+    "checkpoint_sha256": "fe9fd2f5b3f160b80c658be64fa531ddd70cd047a8fc56e4d693241d5a3b2385",
+    "num_hidden_layers": 36,
+    "removed_layers": [],
+    "actual_parameter_retention": null
+  },
+  {
+    "retention": "90",
+    "model": "swe_lego_qwen3_8b",
+    "method": "sparsegpt",
+    "checkpoint_sha256": "5bbe51608c40201b35af6a677bff3a113f1b5a56708c61a30233ed5826be8000",
+    "num_hidden_layers": 36,
+    "removed_layers": [],
+    "actual_parameter_retention": null
+  },
+  {
+    "retention": "90",
+    "model": "swe_lego_qwen3_8b",
+    "method": "tabp",
+    "checkpoint_sha256": "f2c474bec6bf22444343ccc989d06b3115feaa9ea1da6e26ee196e1ece260ed9",
+    "num_hidden_layers": 32,
+    "removed_layers": [
+      35,
+      34,
+      33,
+      32
+    ],
+    "actual_parameter_retention": 0.905772732337617
+  },
+  {
+    "retention": "80",
+    "model": "granite_4_2_8b",
+    "method": "magnitude",
+    "checkpoint_sha256": "6076f33e14660b6911b301e769499a4d0f58fb02160a3c5c89011330ef02f2d8",
+    "num_hidden_layers": 40,
+    "removed_layers": [],
+    "actual_parameter_retention": null
+  },
+  {
+    "retention": "80",
+    "model": "granite_4_2_8b",
+    "method": "wanda",
+    "checkpoint_sha256": "c8bd1619b20a1b4524d0708d54ab1af1d7515b8ed2a19583d9bc79b5bbe047a3",
+    "num_hidden_layers": 40,
+    "removed_layers": [],
+    "actual_parameter_retention": null
+  },
+  {
+    "retention": "80",
+    "model": "granite_4_2_8b",
+    "method": "sparsegpt",
+    "checkpoint_sha256": "e820d2ac4b495650023e3b22cf4ea5c98d3a10d39563d4674e8c5110fae5c191",
+    "num_hidden_layers": 40,
+    "removed_layers": [],
+    "actual_parameter_retention": null
+  },
+  {
+    "retention": "80",
+    "model": "granite_4_2_8b",
+    "method": "tabp",
+    "checkpoint_sha256": "8bcec8170bf8776bbd181c516208c436c0f631214448dfca74311df628f42ae9",
+    "num_hidden_layers": 31,
+    "removed_layers": [
+      23,
+      24,
+      21,
+      26,
+      22,
+      27,
+      29,
+      25,
+      28
+    ],
+    "actual_parameter_retention": 0.7960393871556128
+  },
+  {
+    "retention": "80",
+    "model": "swe_lego_qwen3_8b",
+    "method": "magnitude",
+    "checkpoint_sha256": "00aae49a5e1f4a59860135b921969cbd7a8418f57f8e9001e09a0ace1ac3ea03",
+    "num_hidden_layers": 36,
+    "removed_layers": [],
+    "actual_parameter_retention": null
+  },
+  {
+    "retention": "80",
+    "model": "swe_lego_qwen3_8b",
+    "method": "wanda",
+    "checkpoint_sha256": "608758db49fa5beefe7f86cd71cc9df5c64b1c051ea959c6a2b89d658d07ab0b",
+    "num_hidden_layers": 36,
+    "removed_layers": [],
+    "actual_parameter_retention": null
+  },
+  {
+    "retention": "80",
+    "model": "swe_lego_qwen3_8b",
+    "method": "sparsegpt",
+    "checkpoint_sha256": "b92b16a8cc933556e1e17261871fc6477098173fee3bb75723eb70702fc21d54",
+    "num_hidden_layers": 36,
+    "removed_layers": [],
+    "actual_parameter_retention": null
+  },
+  {
+    "retention": "80",
+    "model": "swe_lego_qwen3_8b",
+    "method": "tabp",
+    "checkpoint_sha256": "6d690d14d795e7afb65af8679ebc89ca6008d69ffacae0f89be1aaedd631669f",
+    "num_hidden_layers": 28,
+    "removed_layers": [
+      35,
+      34,
+      33,
+      32,
+      31,
+      30,
+      21,
+      25
+    ],
+    "actual_parameter_retention": 0.811545464675234
+  }
+]
